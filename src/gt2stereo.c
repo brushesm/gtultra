@@ -204,6 +204,39 @@ int jdebug[16];
 
 WAVEFORM_INFO waveformDisplayInfo;
 
+static int isvalidrelocatorsidaddress(int address)
+{
+	return (address >= 0xd400) && (address <= 0xe000) && (((address - 0xd400) & 0x1f) == 0);
+}
+
+static void decodelegacysidaddress(void)
+{
+	int lowaddress = sidaddress & 0xffff;
+	int highaddress = (sidaddress >> 16) & 0xffff;
+
+	if ((lowaddress == sidAddr1) && isvalidrelocatorsidaddress(highaddress))
+		sidAddr2 = highaddress;
+	else if ((highaddress == sidAddr1) && isvalidrelocatorsidaddress(lowaddress))
+		sidAddr2 = lowaddress;
+}
+
+static void synclegacysidaddress(void)
+{
+	sidaddress = (unsigned int)sidAddr1 | ((unsigned int)sidAddr2 << 16);
+}
+
+static void validaterelocatorsettings(void)
+{
+	if ((fileformat < FORMAT_SID) || (fileformat > FORMAT_ASM))
+		fileformat = FORMAT_PRG;
+
+	if (!isvalidrelocatorsidaddress(sidAddr2)) sidAddr2 = 0xd420;
+	if (!isvalidrelocatorsidaddress(sidAddr3)) sidAddr3 = 0xd440;
+	if (!isvalidrelocatorsidaddress(sidAddr4)) sidAddr4 = 0xd460;
+
+	synclegacysidaddress();
+}
+
 
 int main(int argc, char** argv)
 {
@@ -213,6 +246,7 @@ int main(int argc, char** argv)
 
 	FILE* configfile;
 	int c, d;
+	int sidaddresssetfromcommandline = 0;
 
 	// JP: SDL2 produces no audio for Windows32 without explicitly setting this (otherwise, it's set to "dummy sound" as the output)
 #ifdef __WIN32__
@@ -312,6 +346,7 @@ int main(int argc, char** argv)
 		getparam(configfile, &patterndispmode);
 
 		getparam(configfile, &sidaddress);
+		decodelegacysidaddress();
 
 		getparam(configfile, (unsigned int*)&editorInfo.finevibrato);
 		getparam(configfile, &editorInfo.optimizepulse);
@@ -355,6 +390,9 @@ int main(int argc, char** argv)
 		getparam(configfile, (unsigned int*)&useRepeatsWhenCompressing);
 		getparam(configfile, (unsigned int*)&SIDTracker64ForIPadIsAmazing);
 		getparam(configfile, (unsigned int*)&debugEnabled);
+		getparam(configfile, (unsigned int*)&sidAddr2);
+		getparam(configfile, (unsigned int*)&sidAddr3);
+		getparam(configfile, (unsigned int*)&sidAddr4);
 
 		fclose(configfile);
 
@@ -462,6 +500,7 @@ int main(int argc, char** argv)
 
 			case 'L':
 				sscanf(&argv[c][2], "%x", &sidaddress);
+				sidaddresssetfromcommandline = 1;
 				break;
 
 			case 'N':
@@ -594,6 +633,9 @@ int main(int argc, char** argv)
 		}
 	}
 
+	if (sidaddresssetfromcommandline)
+		decodelegacysidaddress();
+
 	fkeys_loadCFG();	// Load fkeys.cfg file and process (user defined F1-F4)
 
 	// Validate parameters
@@ -624,6 +666,8 @@ int main(int argc, char** argv)
 
 	if (editorInfo.maxSIDChannels != 3 && editorInfo.maxSIDChannels != 6 && editorInfo.maxSIDChannels != 9 && editorInfo.maxSIDChannels != 12)
 		editorInfo.maxSIDChannels = 6;
+
+	validaterelocatorsettings();
 
 	editorInfo.sidmodel &= 1;
 	editorInfo.adparam &= 0xffff;
@@ -845,6 +889,7 @@ int main(int argc, char** argv)
 	strcat(appFileName, "/gtultra.cfg");
 #endif
 #endif
+	synclegacysidaddress();
 	configfile = fopen(appFileName, "wt");
 	if (configfile)
 	{
@@ -858,7 +903,7 @@ int main(int argc, char** argv)
 			";Hardsid device number (0 = off)\n%d\n\n"
 			";reSID model (0 = 6581, 1 = 8580)\n%d\n\n"
 			";Timing mode (0 = PAL, 1 = editorInfo.ntsc)\n%d\n\n"
-			";Packer/relocator fileformat (0 = SID, 1 = PRG, 2 = BIN)\n%d\n\n"
+			";Packer/relocator fileformat (0 = SID, 1 = PRG, 2 = BIN, 3 = ASM)\n%d\n\n"
 			";Packer/relocator player address\n$%04x\n\n"
 			";Packer/relocator zeropage baseaddress\n$%02x\n\n"
 			";Packer/relocator player type (0 = standard ... 3 = minimal)\n%d\n\n"
@@ -908,7 +953,10 @@ int main(int argc, char** argv)
 			";AutoNextPattern Automatically move to next or previous pattern in order list when moving cursor in pattern view (0=OFF. 1=ON)\n%d\n\n"
 			";Use repeats when compressing from expanded orderlist view (0=NO. 1=YES)\n%d\n\n"
 			";SIDTracker64 style pattern editing (SIDTracker64 IS Amazing) (0=NO. 1=YES. WARNING. NOT COMPATIBLE WITH STANDARD GOATTRACKER EDITING!!)\n%d\n\n"
-			";Perform MemoryChecks (Debug)\n%d\n\n",
+			";Perform MemoryChecks (Debug)\n%d\n\n"
+			";Packer/relocator SID2 address\n$%04x\n\n"
+			";Packer/relocator SID3 address\n$%04x\n\n"
+			";Packer/relocator SID4 address\n$%04x\n\n",
 			b,
 			mr,
 			hardsid,
@@ -964,7 +1012,10 @@ int main(int argc, char** argv)
 			autoNextPattern,
 			useRepeatsWhenCompressing,
 			SIDTracker64ForIPadIsAmazing,
-			debugEnabled
+			debugEnabled,
+			sidAddr2,
+			sidAddr3,
+			sidAddr4
 		);
 
 		fclose(configfile);
@@ -2967,9 +3018,11 @@ void setspecialnotenames()
 				break;
 			if (i < 93)
 			{
-				name = malloc(4);
-				strncpy(name, specialnotenames + j, 2);
 				sprintf(octave, "%d", oct);
+				name = malloc(2 + strlen(octave) + 1);
+				if (!name)
+					return;
+				memcpy(name, specialnotenames + j, 2);
 				strcpy(name + 2, octave);
 				notename[i] = name;
 				i++;

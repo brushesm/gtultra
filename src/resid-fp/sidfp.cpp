@@ -19,6 +19,7 @@
 
 #include "sidfp.h"
 #include <math.h>
+#include <stdint.h>
 
 #define RINGSIZE 2048
 
@@ -708,10 +709,9 @@ static float convolve(const float *a, const float *b, int n)
 #ifdef __SSE__
 	__m128 out4 = { 0, 0, 0, 0 };
 
-	/* examine if we can use aligned loads on both pointers -- some x86-32/64
-	 * hackery here ... should use uintptr_t, but that needs --std=C99... */
+	/* examine if we can use aligned loads on both pointers */
 	int diff = static_cast<int>(a - b) & 0xf;
-	int a_align = static_cast<int>(reinterpret_cast<long>(a)) & 0xf;
+	int a_align = static_cast<int>(reinterpret_cast<uintptr_t>(a)) & 0xf;
 
 	/* advance if necessary. We can't let n fall < 0, so no while (n --). */
 	while (n > 0 && a_align != 0 && a_align != 16) {

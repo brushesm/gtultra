@@ -466,13 +466,12 @@ void displayPatternInfo(GTOBJECT *gt)
 				sprintf(infoTextBuffer, "Channel Tempo: %02X", (data - 0x80));
 		}
 		else
-			sprintf(infoTextBuffer, patternInstructionInfoString[instr]);
+			sprintf(infoTextBuffer, "Unknown pattern command: $%02X", instr);
 	}
 	else
 		sprintf(infoTextBuffer, "                                ");
 
 }
-
 
 
 

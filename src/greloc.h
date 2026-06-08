@@ -4,6 +4,7 @@
 #define FORMAT_SID 0
 #define FORMAT_PRG 1
 #define FORMAT_BIN 2
+#define FORMAT_ASM 3
 
 #define PLAYER_BUFFERED 8
 #define PLAYER_SOUNDEFFECTS 16

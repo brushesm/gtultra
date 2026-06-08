@@ -103,6 +103,126 @@ extern char packedsongname[MAX_PATHNAME];
 #define printmainscreen(c)
 #endif
 
+static char* findinsource(char* source, int sourcelen, const char* text)
+{
+	int textlen = strlen(text);
+	int pos;
+
+	for (pos = 0; pos <= sourcelen - textlen; pos++)
+	{
+		if (!memcmp(source + pos, text, textlen))
+			return source + pos;
+	}
+	return NULL;
+}
+
+static char* findsourcechar(char* source, char* sourceend, char value)
+{
+	while (source < sourceend)
+	{
+		if (*source == value)
+			return source;
+		source++;
+	}
+	return NULL;
+}
+
+static void writeauthorinfobytes(FILE* handle)
+{
+	int row, c;
+
+	for (row = 0; row < 2; row++)
+	{
+		fprintf(handle, "                .BYTE (");
+		for (c = 0; c < 16; c++)
+		{
+			unsigned char byte = authorname[row * 16 + c];
+			if (!byte) byte = 0x20;
+			fprintf(handle, "%s$%02x", c ? "," : "", byte);
+		}
+		fprintf(handle, ")\n");
+	}
+}
+
+static void writeasmsource(FILE* handle)
+{
+	char* source = (char*)membuf_get(&src);
+	int sourcelen = membuf_memlen(&src);
+	char* sourceend = source + sourcelen;
+	char* label;
+	char* line1;
+	char* line2;
+	char* afterauthor;
+
+	if (!(playerversion & PLAYER_AUTHORINFO))
+	{
+		fwrite(source, sourcelen, 1, handle);
+		return;
+	}
+
+	label = findinsource(source, sourcelen, "mt_author:");
+	if (!label)
+	{
+		fwrite(source, sourcelen, 1, handle);
+		return;
+	}
+
+	line1 = findsourcechar(label, sourceend, '\n');
+	if (!line1)
+	{
+		fwrite(source, sourcelen, 1, handle);
+		return;
+	}
+	line1++;
+	line2 = findsourcechar(line1, sourceend, '\n');
+	if (!line2)
+	{
+		fwrite(source, sourcelen, 1, handle);
+		return;
+	}
+	line2++;
+	afterauthor = findsourcechar(line2, sourceend, '\n');
+	if (!afterauthor)
+	{
+		fwrite(source, sourcelen, 1, handle);
+		return;
+	}
+	afterauthor++;
+
+	fwrite(source, line1 - source, 1, handle);
+	writeauthorinfobytes(handle);
+	fwrite(afterauthor, sourceend - afterauthor, 1, handle);
+}
+
+static void appendbounded(char *dest, size_t destSize, const char *src)
+{
+	size_t used;
+
+	if (!dest || !src || destSize == 0)
+		return;
+
+	used = strlen(dest);
+	if (used >= destSize - 1)
+		return;
+
+	strncat(dest, src, destSize - used - 1);
+}
+
+static void buildrelocatortitle(char *dest, size_t destSize)
+{
+	if (!dest || destSize == 0)
+		return;
+
+	dest[0] = 0;
+	appendbounded(dest, destSize, programname);
+	appendbounded(dest, destSize, " Packer/Relocator");
+	if (strlen(loadedsongfilename))
+	{
+		appendbounded(dest, destSize, " - ");
+		appendbounded(dest, destSize, loadedsongfilename);
+	}
+}
+
 
 
 void relocator(GTOBJECT *gt, int gt2relocMode, int autoSave)
@@ -153,7 +273,9 @@ void relocator(GTOBJECT *gt, int gt2relocMode, int autoSave)
 	unsigned char *pattwork = NULL;
 	unsigned char *instrwork = NULL;
 
+#ifndef GT2RELOC
 	char temppackedsongname[MAX_FILENAME];
+#endif
 
 	channels = editorInfo.maxSIDChannels;
 	fixedparams = 1;
@@ -224,15 +346,10 @@ void relocator(GTOBJECT *gt, int gt2relocMode, int autoSave)
 
 		if (!autoSave)
 		{
-			playerversion = 0;
-
 			// Select playroutine options
 			clearscreen(getColor(1, 0));
 			printblankc(0, 0, getColor(15, 1), MAX_COLUMNS);
-			if (!strlen(loadedsongfilename))
-				sprintf(textbuffer, "%s Packer/Relocator", programname);
-			else
-				sprintf(textbuffer, "%s Packer/Relocator - %s", programname, loadedsongfilename);
+			buildrelocatortitle(textbuffer, sizeof textbuffer);
 			textbuffer[MAX_COLUMNS] = 0;
 			printtext(0, 0, getColor(15, 1), textbuffer);
 			printtext(1, 2, getColor(CTITLE, 0), "SELECT PLAYROUTINE OPTIONS: (CURSORS=MOVE/CHANGE, ENTER=ACCEPT, ESC=CANCEL)");
@@ -245,8 +362,8 @@ void relocator(GTOBJECT *gt, int gt2relocMode, int autoSave)
 			}
 
 			playerversion |= PLAYER_BUFFERED;
-			playerversion &= ~PLAYER_ZPGHOSTREGS;
-			playerversion &= ~PLAYER_ZPPLAYSID;
+			if (!(playerversion & PLAYER_ZPGHOSTREGS))
+				playerversion &= ~PLAYER_ZPPLAYSID;
 
 			selectdone = 0;
 
@@ -436,8 +553,7 @@ void relocator(GTOBJECT *gt, int gt2relocMode, int autoSave)
 
 				yPos++;
 
-				sidaddress = sidAddr1;
-				sidaddress |= (sidAddr2 << 16);
+				sidaddress = (unsigned int)sidAddr1 | ((unsigned int)sidAddr2 << 16);
 			}
 
 			if (editorInfo.maxSIDChannels > 6)
@@ -1892,7 +2008,7 @@ void relocator(GTOBJECT *gt, int gt2relocMode, int autoSave)
 	SDL_Log("Tables:          %d bytes\n", wavetblsize + pulsetblsize + filttblsize + speedtblsize);
 	SDL_Log("Total size:      %d bytes\n", packedsize);
 
-	songhandle = fopen(packedsongname, "wb");
+	songhandle = fopen(packedsongname, fileformat == FORMAT_ASM ? "wt" : "wb");
 	if (!songhandle)
 	{
 		fprintf(STDERR, "error: could not open output file '%s'.\n", packedsongname);
@@ -1904,10 +2020,7 @@ void relocator(GTOBJECT *gt, int gt2relocMode, int autoSave)
 		// Print results
 		clearscreen(getColor(1, 0));
 		printblankc(0, 0, 15 + 16, MAX_COLUMNS);
-		if (!strlen(loadedsongfilename))
-			sprintf(textbuffer, "%s Packer/Relocator", programname);
-		else
-			sprintf(textbuffer, "%s Packer/Relocator - %s", programname, loadedsongfilename);
+		buildrelocatortitle(textbuffer, sizeof textbuffer);
 		textbuffer[80] = 0;
 		printtext(0, 0, getColor(0, 15), textbuffer);
 
@@ -1958,6 +2071,11 @@ void relocator(GTOBJECT *gt, int gt2relocMode, int autoSave)
 				printtext(1, 14, getColor(CEDIT, 0), "BIN - Raw binary format (no startaddress)");
 				strcpy(packedfilter, "*.bin");
 				break;
+
+			case FORMAT_ASM:
+				printtext(1, 14, getColor(CEDIT, 0), "ASM - Relocator assembler source         ");
+				strcpy(packedfilter, "*.asm");
+				break;
 			}
 
 			fliptoscreen();
@@ -1974,13 +2092,13 @@ void relocator(GTOBJECT *gt, int gt2relocMode, int autoSave)
 			case KEY_LEFT:
 			case KEY_DOWN:
 				fileformat--;
-				if (fileformat < FORMAT_SID) fileformat = FORMAT_BIN;
+				if (fileformat < FORMAT_SID) fileformat = FORMAT_ASM;
 				break;
 
 			case KEY_RIGHT:
 			case KEY_UP:
 				fileformat++;
-				if (fileformat > FORMAT_BIN) fileformat = FORMAT_SID;
+				if (fileformat > FORMAT_ASM) fileformat = FORMAT_SID;
 				break;
 
 			case KEY_ESC:
@@ -2023,6 +2141,10 @@ void relocator(GTOBJECT *gt, int gt2relocMode, int autoSave)
 
 			case FORMAT_SID:
 				strcat(packedsongname, ".sid");
+				break;
+
+			case FORMAT_ASM:
+				strcat(packedsongname, ".asm");
 				break;
 			}
 		}
@@ -2067,14 +2189,18 @@ void relocator(GTOBJECT *gt, int gt2relocMode, int autoSave)
 					case FORMAT_SID:
 						strcat(packedsongname, ".sid");
 						break;
+
+					case FORMAT_ASM:
+						strcat(packedsongname, ".asm");
+						break;
 					}
 				}
 			}
-			songhandle = fopen(packedsongname, "wb");
+			songhandle = fopen(packedsongname, fileformat == FORMAT_ASM ? "wt" : "wb");
 		}
 	}
 	else
-		songhandle = fopen(packedsongname, "wb");
+		songhandle = fopen(packedsongname, fileformat == FORMAT_ASM ? "wt" : "wb");
 #endif
 
 	if (fileformat == FORMAT_PRG)
@@ -2237,7 +2363,10 @@ void relocator(GTOBJECT *gt, int gt2relocMode, int autoSave)
 			fwrite(speedcode, 10, 1, songhandle);
 	}
 
-	fwrite(packeddata, packedsize, 1, songhandle);
+	if (fileformat == FORMAT_ASM)
+		writeasmsource(songhandle);
+	else
+		fwrite(packeddata, packedsize, 1, songhandle);
 	fclose(songhandle);
 
 	songExported = 1;
@@ -2664,10 +2793,8 @@ void insertdefine(const char *name, int value)
 
 void insertlabel(const char *name)
 {
-	char insertbuffer[80];
-
-	sprintf(insertbuffer, "%s:\n", name);
-	inserttext(insertbuffer);
+	inserttext(name);
+	inserttext(":\n");
 }
 
 void insertdefinestring(const char *name, const char *name2)
@@ -2719,18 +2846,16 @@ void insertbyte(unsigned char byte)
 
 void insertaddrlo(const char *name)
 {
-	char insertbuffer[80];
-
-	sprintf(insertbuffer, "                .BYTE (%s %% 256)\n", name);
-	inserttext(insertbuffer);
+	inserttext("                .BYTE (");
+	inserttext(name);
+	inserttext(" % 256)\n");
 }
 
 void insertaddrhi(const char *name)
 {
-	char insertbuffer[80];
-
-	sprintf(insertbuffer, "                .BYTE (%s / 256)\n", name);
-	inserttext(insertbuffer);
+	inserttext("                .BYTE (");
+	inserttext(name);
+	inserttext(" / 256)\n");
 }
 
 void findtableduplicates(int num)
@@ -2857,5 +2982,3 @@ void calcspeedtest(unsigned char pos)
 	if (ltable[STBL][pos - 1] >= 0x80) nocalculatedspeed = 0;
 	else nonormalspeed = 0;
 }
-
-

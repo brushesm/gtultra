@@ -697,7 +697,7 @@ void displayPattern6Chn(GTOBJECT *gt)
 				else if ((p% stepsize) == 0)
 					color = getColor(CPATTERN_FIRST_FOREGROUND1, CPATTERN_FIRST_BACKGROUND1);
 
-				if (gt->chn[c2].lastpattptr == 0x7ffffffff)
+				if (gt->chn[c2].lastpattptr == 0x7fffffff)
 				{
 					// Not sure what this will do in this case, so let's see what the screen shows...
 					color = 2;
@@ -1140,7 +1140,7 @@ void displayPattern3Chn(GTOBJECT *gt)
 				else if ((p% stepsize) == 0)
 					color = getColor(CPATTERN_FIRST_FOREGROUND1, CPATTERN_FIRST_BACKGROUND1);
 
-				if (gt->chn[c2].lastpattptr == 0x7ffffffff)
+				if (gt->chn[c2].lastpattptr == 0x7fffffff)
 				{
 					// Not sure what this will do in this case, so let's see what the screen shows...
 					color = 2;
@@ -2005,6 +2005,20 @@ void updateDisplayWhenFollowingAndPlaying_Expanded(GTOBJECT *gt)
 	}
 }
 
+static void appendbounded(char *dest, size_t destSize, const char *src)
+{
+	size_t used;
+
+	if (!dest || !src || destSize == 0)
+		return;
+
+	used = strlen(dest);
+	if (used >= destSize - 1)
+		return;
+
+	strncat(dest, src, destSize - used - 1);
+}
+
 void displayTopBar(int menu, int cc)
 {
 	printblankc(0, 0, getColor(TOPBAR_FOREGROUND, TOPBAR_BACKGROUND), MAX_COLUMNS);
@@ -2012,12 +2026,13 @@ void displayTopBar(int menu, int cc)
 	int menuInfoXOffset = 38;
 	if (!menu)
 	{
-		if (!strlen(loadedsongfilename))
-			sprintf(textbuffer, "%s", programname);
-		else
+		textbuffer[0] = 0;
+		appendbounded(textbuffer, sizeof textbuffer, programname);
+		if (strlen(loadedsongfilename))
 		{
 			//	int lockPatternColor = getColor(CTITLES_FOREGROUND, CGENERAL_BACKGROUND);	//0xe;
-			sprintf(textbuffer, "%s: %s", programname, loadedsongfilename);
+			appendbounded(textbuffer, sizeof textbuffer, ": ");
+			appendbounded(textbuffer, sizeof textbuffer, loadedsongfilename);
 			//	printtext(PANEL_ORDER_X, PANEL_ORDER_Y - 1, lockPatternColor, textbuffer);
 			//	sprintf(textbuffer, "%s - %s", programname, loadedsongfilename);
 		}
@@ -3324,8 +3339,6 @@ void displayExpandedOrderList(GTOBJECT *gt, int cc, int OX, int OY)
 		}
 	}
 }
-
-
 
 
 

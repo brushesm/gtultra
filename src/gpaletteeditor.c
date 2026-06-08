@@ -615,12 +615,23 @@ int loadPalette(char *palettePath,char *paletteFileName)
 
 void setPaletteName(char* paletteName, int index)
 {
+	size_t nameLen;
+	char *newName;
+
+	if (!paletteName || index < 0 || index >= MAX_PALETTE_PRESETS)
+		return;
+
+	nameLen = strlen(paletteName) + 1;
+	newName = malloc(nameLen);
+	if (!newName)
+		return;
+	memcpy(newName, paletteName, nameLen);
+
 	if (paletteNames[index] != NULL)
 	{
 		free(paletteNames[index]);
 	}
-	paletteNames[index] = malloc(strlen(paletteName));
-	strcpy(paletteNames[index], paletteName);	// copy filename. This is saved in the cfg file as the one to start up with
+	paletteNames[index] = newName;	// copy filename. This is saved in the cfg file as the one to start up with
 }
 
 int readPaletteData(char *paletteMem, char *paletteName)

@@ -27,6 +27,7 @@
 FilterFP::FilterFP()
 {
   model = (chip_model) 0; // neither 6581/8580; init time only
+  nonlinearity = 0.9613160610660189f;
   enable_filter(true);
   /* approximate; sid.cc calls us when set_sampling_parameters() occurs. */
   set_clock_frequency(1e6f);

@@ -1372,7 +1372,7 @@ case YY_STATE_EOF(MACROO):
 case 111:
 YY_RULE_SETUP
 // #line 188 "asm.yy"
-ECHO;
+/* ignore scanner fallback text */
 	YY_BREAK
 // #line 1375 "lex.yy.c"
 
@@ -2319,5 +2319,3 @@ void yycleanup()
   	yy_start_stack_depth = 0;
   }
 }
-
-

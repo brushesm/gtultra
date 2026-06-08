@@ -1,5 +1,53 @@
 # GTUltra 1.1.0 - Based on GoatTracker v2.76 Stereo
 ------------------------
+## Building on macOS
+
+Install Xcode command line tools and SDL2, then build from the repository root:
+
+```sh
+brew install sdl2
+./build-macos.sh
+```
+
+The script writes binaries to `build/macos` so local builds do not overwrite the tracked release binaries in `mac/`.
+
+## Building on Windows
+
+Install MSYS2 MinGW with GCC, GNU Make, binutils, and SDL2 development libraries:
+
+```sh
+pacman -S --needed base-devel mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-SDL2
+```
+
+From an MSYS2 shell, run:
+
+```sh
+./build-windows-msys2.sh
+```
+
+The script writes binaries to `build/windows` so local builds do not overwrite the tracked release binaries in `win32/`.
+
+From a Windows command prompt with the MinGW `bin` directory on `PATH`, run:
+
+```bat
+build-windows.bat
+```
+
+If SDL2 is installed outside the default MinGW search path for the batch script, set `SDL2_PREFIX` first, for example `set SDL2_PREFIX=C:\msys64\mingw64`.
+
+## GTUltra to 1raster Conversion
+
+An experimental converter for Hermit's 1raster tracker lives in `tools/gtultra2raster`.
+
+```sh
+make -C tools/gtultra2raster
+tools/gtultra2raster/gtultra2raster examples/Jammer/\$3GarysGlitteringSaliva_4x.sng -o /tmp/gary --asm
+```
+
+By default the converter writes binary `.orm` and `.orb` files when the tune fits each target. `--format orm|orb|both` selects binary targets. `--asm` emits Kick Assembler source with the embedded 1raster player, while `--asm-mode data` or `--asm-data` emits only the tune data for inclusion with another player build.
+
+See `docs/gtultra-to-1raster.md` for composing guidelines and conversion limits.
+
 ## Attribution
  - Original Editor by Lasse Öörni (loorni@gmail.com)
  - HardSID 4U support by Téli Sándor. 

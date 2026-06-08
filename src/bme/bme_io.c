@@ -234,8 +234,13 @@ int io_lseek(int index, int offset, int whence)
 
 int io_read(int index, void *buffer, int length)
 {
+    if (length <= 0) return 0;
+    if (!buffer) return -1;
+
     if (!io_usedatafile)
     {
+        if ((index < 0) || (index >= MAX_HANDLES)) return -1;
+        if (!fileptr[index]) return -1;
         return fread(buffer, 1, length, fileptr[index]);
     }
     else
@@ -245,8 +250,10 @@ int io_read(int index, void *buffer, int length)
         if ((index < 0) || (index >= MAX_HANDLES)) return -1;
 
         if (!handle[index].open) return -1;
-        if (length + handle[index].filepos > handle[index].currentheader->length)
-        length = handle[index].currentheader->length - handle[index].filepos;
+        if (handle[index].filepos < 0) handle[index].filepos = 0;
+        if (handle[index].filepos >= handle[index].currentheader->length) return 0;
+        if (length > handle[index].currentheader->length - handle[index].filepos)
+            length = handle[index].currentheader->length - handle[index].filepos;
         
         if (datafilehandle)
         {
@@ -283,7 +290,7 @@ void io_close(int index)
 
 unsigned io_read8(int index)
 {
-    unsigned char byte;
+    unsigned char byte = 0;
 
     io_read(index, &byte, 1);
     return byte;
@@ -291,42 +298,42 @@ unsigned io_read8(int index)
 
 unsigned io_readle16(int index)
 {
-    unsigned char bytes[2];
+    unsigned char bytes[2] = { 0, 0 };
 
     io_read(index, bytes, 2);
-    return (bytes[1] << 8) | bytes[0];
+    return ((unsigned)bytes[1] << 8) | bytes[0];
 }
 
 unsigned io_readhe16(int index)
 {
-    unsigned char bytes[2];
+    unsigned char bytes[2] = { 0, 0 };
 
     io_read(index, bytes, 2);
-    return (bytes[0] << 8) | bytes[1];
+    return ((unsigned)bytes[0] << 8) | bytes[1];
 }
 
 unsigned io_readle32(int index)
 {
-    unsigned char bytes[4];
+    unsigned char bytes[4] = { 0, 0, 0, 0 };
 
     io_read(index, bytes, 4);
-    return (bytes[3] << 24) | (bytes[2] << 16) | (bytes[1] << 8) | bytes[0];
+    return ((unsigned)bytes[3] << 24) | ((unsigned)bytes[2] << 16) | ((unsigned)bytes[1] << 8) | bytes[0];
 }
 
 unsigned io_readhe32(int index)
 {
-    unsigned char bytes[4];
+    unsigned char bytes[4] = { 0, 0, 0, 0 };
 
     io_read(index, bytes, 4);
-    return (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3];
+    return ((unsigned)bytes[0] << 24) | ((unsigned)bytes[1] << 16) | ((unsigned)bytes[2] << 8) | bytes[3];
 }
 
 static unsigned freadle32(FILE *file)
 {
-    unsigned char bytes[4];
+    unsigned char bytes[4] = { 0, 0, 0, 0 };
 
     fread(&bytes, 4, 1, file);
-    return (bytes[3] << 24) | (bytes[2] << 16) | (bytes[1] << 8) | bytes[0];
+    return ((unsigned)bytes[3] << 24) | ((unsigned)bytes[2] << 16) | ((unsigned)bytes[1] << 8) | bytes[0];
 }
 
 static void linkedseek(unsigned pos)
@@ -337,6 +344,8 @@ static void linkedseek(unsigned pos)
 static void linkedread(void *buffer, int length)
 {
     unsigned char *dest = (unsigned char *)buffer;
+    if (length <= 0) return;
+
     while (length--)
     {
         *dest++ = *datafileptr++;
@@ -345,9 +354,8 @@ static void linkedread(void *buffer, int length)
 
 static unsigned linkedreadle32(void)
 {
-    unsigned char bytes[4];
+    unsigned char bytes[4] = { 0, 0, 0, 0 };
 
     linkedread(&bytes, 4);
-    return (bytes[3] << 24) | (bytes[2] << 16) | (bytes[1] << 8) | bytes[0];
+    return ((unsigned)bytes[3] << 24) | ((unsigned)bytes[2] << 16) | ((unsigned)bytes[1] << 8) | bytes[0];
 }    
-

@@ -1,0 +1,8 @@
+/build/
+/src/**/*.o
+/src/bme/datafile
+/src/bme/dat2inc
+/tools/gtultra2raster/gtultra2raster
+/bak
+/.vs
+/1r-sample

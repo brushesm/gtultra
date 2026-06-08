@@ -1438,7 +1438,6 @@ yyparse ()
   int yylen;
 
   YYDPRINTF ((stderr, "Starting parse\n"));
-  printf("Starting parse\n");
 
   yystate = 0;
   yyerrstatus = 0;
@@ -2880,18 +2879,14 @@ void asm_set_source(struct membuf *buffer);
 
 int assemble(struct membuf *source, struct membuf *dest)
 {
-    int val;
+    int val = 0;
 
-	fprintf(stderr,"Assemble check1");
-	fprintf(stderr, "Assemble checka. Val:%d", val);
     LOG_INIT_CONSOLE(LOG_NORMAL);
     parse_init();
-    yydebug = 1;
+    yydebug = 0;
     asm_src_buffer_push(source);
     vec_init(asm_atoms, sizeof(struct atom*));
-	fprintf(stderr, "Assemble check3. Val:%d", val);
     val = yyparse();
-	fprintf(stderr, "Assemble check4. Val:%d", val);
     if(val == 0)
     {
         output_atoms(dest, asm_atoms);
@@ -2903,4 +2898,3 @@ int assemble(struct membuf *source, struct membuf *dest)
 
     return val;
 }
-
