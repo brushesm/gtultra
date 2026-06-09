@@ -34,9 +34,7 @@ void orderlistcommands(GTOBJECT *gt)
 
 
 //	int playingSong = getActualSongNumber(editorInfo.esnum, c2);	// JP added this. Only highlight playing row if showing the right song
-	int maxCh = 6;
-	if ((editorInfo.maxSIDChannels == 3) || (editorInfo.maxSIDChannels == 9 && (editorInfo.esnum & 1)))
-		maxCh = 3;
+	int maxCh = getVisibleChannelCount();
 
 	if (hexnybble >= 0)
 	{
@@ -503,9 +501,10 @@ void orderlistcommands(GTOBJECT *gt)
 			{
 				editorInfo.escolumn = 4;
 
-				editorInfo.eschn--;
-				if (editorInfo.eschn < 0)
-					editorInfo.eschn = maxCh - 1;
+				int visualChannel = getEditorVisualOrderChannel() - 1;
+				if (visualChannel < 0)
+					visualChannel = maxCh - 1;
+				setEditorVisualOrderChannel(visualChannel);
 
 				setMasterLoopChannel(gt, "debug_1");
 
@@ -541,9 +540,10 @@ void orderlistcommands(GTOBJECT *gt)
 			editorInfo.escolumn %= 5;
 			if (!editorInfo.escolumn)
 			{
-				editorInfo.eschn++;
-				if (editorInfo.eschn >= maxCh)
-					editorInfo.eschn = 0;
+				int visualChannel = getEditorVisualOrderChannel() + 1;
+				if (visualChannel >= maxCh)
+					visualChannel = 0;
+				setEditorVisualOrderChannel(visualChannel);
 
 				setMasterLoopChannel(gt, "debug_2");
 			}
@@ -566,8 +566,10 @@ void orderlistcommands(GTOBJECT *gt)
 	case KEY_UP:
 		if (editorInfo.expandOrderListView == 0)
 		{
-			editorInfo.eschn--;
-			if (editorInfo.eschn < 0) editorInfo.eschn = maxCh - 1;
+			int visualChannel = getEditorVisualOrderChannel() - 1;
+			if (visualChannel < 0)
+				visualChannel = maxCh - 1;
+			setEditorVisualOrderChannel(visualChannel);
 			if ((editorInfo.eseditpos == songlen[editorInfo.esnum][editorInfo.eschn]) || (editorInfo.eseditpos > songlen[editorInfo.esnum][editorInfo.eschn] + 1))
 			{
 				editorInfo.eseditpos = songlen[editorInfo.esnum][editorInfo.eschn] + 1;
@@ -605,8 +607,10 @@ void orderlistcommands(GTOBJECT *gt)
 
 		if (editorInfo.expandOrderListView == 0)
 		{
-			editorInfo.eschn++;
-			if (editorInfo.eschn >= maxCh) editorInfo.eschn = 0;
+			int visualChannel = getEditorVisualOrderChannel() + 1;
+			if (visualChannel >= maxCh)
+				visualChannel = 0;
+			setEditorVisualOrderChannel(visualChannel);
 			if ((editorInfo.eseditpos == songlen[editorInfo.esnum][editorInfo.eschn]) || (editorInfo.eseditpos > songlen[editorInfo.esnum][editorInfo.eschn] + 1))
 			{
 				editorInfo.eseditpos = songlen[editorInfo.esnum][editorInfo.eschn] + 1;

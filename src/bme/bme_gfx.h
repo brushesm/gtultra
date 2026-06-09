@@ -1,6 +1,7 @@
 // BME graphics module header file
 
 void gfx_resize(unsigned int xsize, unsigned int ysize);
+void gfx_setvisiblewidth(unsigned int xsize);
 
 int gfx_init(unsigned xsize, unsigned ysize, unsigned framerate, unsigned flags);
 int gfx_reinit(void);
@@ -32,6 +33,7 @@ extern unsigned gfx_windowxsize;
 extern unsigned gfx_windowysize;
 extern unsigned gfx_virtualxsize;
 extern unsigned gfx_virtualysize;
+extern int gfx_visiblexsize;
 extern unsigned gfx_nblocks;
 extern int gfx_blockxsize;
 extern int gfx_blockysize;

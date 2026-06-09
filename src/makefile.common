@@ -2,7 +2,7 @@
 
 CC?=gcc
 CXX?=g++
-CFLAGS+=-Ibme -Iasm -O3 -Wall
+CFLAGS+=-Ibme -Iasm -O3 -Wall -fno-common
 CXXFLAGS+=-Ibme -Iasm -O3 -Wall -fpermissive
 DATAFILE?=./bme/datafile
 DAT2INC?=./bme/dat2inc

@@ -907,13 +907,17 @@ std::vector<ProgramRow> buildWavetableRows(const Song& song, int instIndex, int 
         uint8_t right = song.tables[WTBL].right[idx];
 
         if (left == 0xff) {
-            if (right != 0 && !jumped && right - 1 < song.tables[WTBL].left.size()) {
+            if (right != 0 && !jumped) {
+                size_t jumpIndex = size_t(right - 1);
+                if (jumpIndex >= song.tables[WTBL].left.size()) {
+                    break;
+                }
                 jumped = true;
                 addWarningOnce(stats,
                                "wtbl-jump:" + std::to_string(instIndex) + ":" + std::to_string(idx) + ":" + std::to_string(right),
                                "GT wavetable jump/loop was unrolled only as far as the 1raster program row budget allows",
                                sourceLocation(2, src) + ": " + instrumentLabel(song, instIndex) + " jumps from WTBL " + hexByte(static_cast<uint8_t>(idx + 1)) + " to " + hexByte(right));
-                idx = size_t(right - 1);
+                idx = jumpIndex;
                 continue;
             }
             break;
@@ -1033,9 +1037,12 @@ void appendPitchChannelProgram(const Song& song, int rasterChannel, const Source
         if (row.command == CMD_SETWAVE && row.parameter != 0) {
             return row.parameter;
         }
-        if (row.command == CMD_SETWAVEPTR && row.parameter > 0 && row.parameter - 1 < song.tables[WTBL].left.size()) {
-            uint8_t wave = waveForActiveInstrument();
+        if (row.command == CMD_SETWAVEPTR && row.parameter > 0) {
             size_t idx = size_t(row.parameter - 1);
+            if (idx >= song.tables[WTBL].left.size()) {
+                return waveForActiveInstrument();
+            }
+            uint8_t wave = waveForActiveInstrument();
             for (int guard = 0; idx < song.tables[WTBL].left.size() && guard < 8; ++idx, ++guard) {
                 uint8_t left = song.tables[WTBL].left[idx];
                 if (left == 0xff) {
@@ -1095,7 +1102,8 @@ void appendPitchChannelProgram(const Song& song, int rasterChannel, const Source
             }
             break;
         case CMD_SETWAVEPTR:
-            if (!isValidNote(row.note) && !isKeyEvent(row.note) && row.parameter > 0 && row.parameter - 1 < song.tables[WTBL].left.size()) {
+            if (!isValidNote(row.note) && !isKeyEvent(row.note) && row.parameter > 0 &&
+                size_t(row.parameter - 1) < song.tables[WTBL].left.size()) {
                 appendDirectSidWrite(program, static_cast<uint8_t>(base + 4), waveForRow());
             }
             break;

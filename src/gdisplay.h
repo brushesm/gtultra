@@ -4,11 +4,11 @@
 
 #define PANEL_NAMES_X 1	//60
 #define PANEL_NAMES_Y 37 //33
-#define PANEL_TABLES_X 60
+#define PANEL_TABLES_X getSidePanelX()
 #define PANEL_TABLES_Y 25 //17
-#define PANEL_INSTR_X 60
+#define PANEL_INSTR_X getSidePanelX()
 #define PANEL_INSTR_Y 18
-#define PANEL_ORDER_X 60
+#define PANEL_ORDER_X getSidePanelX()
 #define PANEL_ORDER_Y 2
 #define EXTENDEDVISIBLEORDERLIST 13
 
@@ -117,6 +117,20 @@ void displayTransportBarKeyboard(int x, int y);
 void displayTransportBarMasterVolume(int x, int y);
 void displayTransportBarDetune(int x, int y);
 void displayTransportBarMonoStereo(int x, int y);
+
+int getVisibleChannelCount(void);
+int getEditorVisualPatternChannel(void);
+int getEditorVisualOrderChannel(void);
+int getVisualChannelSongNumber(int visualChannel);
+int getVisualChannelLocalChannel(int visualChannel);
+int getVisualChannelActualChannel(int visualChannel);
+void setEditorVisualPatternChannel(int visualChannel);
+void setEditorVisualOrderChannel(int visualChannel);
+int getPatternChannelWidth(void);
+int getPatternAreaWidth(void);
+int getSidePanelX(void);
+int getSidePanelWidth(void);
+int getLayoutColumns(void);
 
 int getTableTitleColour(int c);
 void displayOriginalTableView(int cc,int OX,int OY);

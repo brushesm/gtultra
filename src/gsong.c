@@ -1709,6 +1709,11 @@ void clearsong(int cs, int cp, int ci, int ct, int cn, GTOBJECT *gt)
 					songorder[d][c][0] = c;
 					songorder[d][c][1] = LOOPSONG;
 				}
+				else if (editorInfo.maxSIDChannels > MAX_CHN && d == 1)
+				{
+					songorder[d][c][0] = c + MAX_CHN;
+					songorder[d][c][1] = LOOPSONG;
+				}
 				else
 				{
 					songorder[d][c][0] = LOOPSONG;
@@ -2901,6 +2906,4 @@ unsigned short songOrderTransposeCopyPaste[MAX_CHN][MAX_SONGLEN_EXPANDED];
 		char *songOrderTransposeCopyPasteExpanded;
 	}SNG_INFO;
 	*/
-
-
 

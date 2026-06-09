@@ -44,6 +44,7 @@ int gfx_virtualxsize;
 int gfx_virtualysize;
 int gfx_windowxsize;
 int gfx_windowysize;
+int gfx_visiblexsize;
 int gfx_blockxsize = 16;
 int gfx_blockysize = 16;
 int spr_xsize = 0;
@@ -90,6 +91,16 @@ void gfx_resize(unsigned int xsize, unsigned int ysize)
 	gfx_windowysize = gfx_virtualysize;
 }
 
+void gfx_setvisiblewidth(unsigned int xsize)
+{
+	if (xsize < 1)
+		xsize = 1;
+	if (xsize > (unsigned)gfx_virtualxsize)
+		xsize = gfx_virtualxsize;
+	gfx_visiblexsize = xsize;
+	gfx_redraw = 1;
+}
+
 int gfx_init(unsigned xsize, unsigned ysize, unsigned framerate, unsigned flags)
 {
 	int sdlflags = SDL_RENDERER_ACCELERATED;
@@ -132,6 +143,7 @@ int gfx_init(unsigned xsize, unsigned ysize, unsigned framerate, unsigned flags)
 
 	gfx_windowxsize = gfx_virtualxsize;
 	gfx_windowysize = gfx_virtualysize;
+	gfx_visiblexsize = gfx_virtualxsize;
 	if (gfx_scanlinemode)
 	{
 		gfx_windowxsize <<= 1;
@@ -159,7 +171,7 @@ int gfx_init(unsigned xsize, unsigned ysize, unsigned framerate, unsigned flags)
 		SDL_TEXTUREACCESS_STREAMING,
 		xsize, ysize);
 	gfx_initexec = 0;
-	if (gfx_screen)
+	if (gfx_renderer && gfx_screen && sdlTexture)
 	{
 		gfx_initted = 1;
 		gfx_redraw = 1;
@@ -167,7 +179,17 @@ int gfx_init(unsigned xsize, unsigned ysize, unsigned framerate, unsigned flags)
 		win_setmousemode(win_mousemode);
 		return BME_OK;
 	}
-	else return BME_ERROR;
+
+	if (sdlTexture)
+		SDL_DestroyTexture(sdlTexture);
+	if (gfx_screen)
+		SDL_FreeSurface(gfx_screen);
+	if (gfx_renderer)
+		SDL_DestroyRenderer(gfx_renderer);
+	sdlTexture = NULL;
+	gfx_screen = NULL;
+	gfx_renderer = NULL;
+	return BME_ERROR;
 }
 
 int gfx_reinit(void)
@@ -209,10 +231,17 @@ void gfx_unlock(void)
 void gfx_flip()
 {
 	SDL_Surface* surf = SDL_ConvertSurfaceFormat(gfx_screen, SDL_PIXELFORMAT_RGBA32, 0);
+	SDL_Rect src;
+
+	src.x = 0;
+	src.y = 0;
+	src.w = gfx_visiblexsize ? gfx_visiblexsize : gfx_virtualxsize;
+	src.h = gfx_virtualysize;
+
 	SDL_UpdateTexture(sdlTexture, NULL, surf->pixels, surf->pitch);
 	SDL_FreeSurface(surf);
 	SDL_RenderClear(gfx_renderer);
-	SDL_RenderCopy(gfx_renderer, sdlTexture, NULL, NULL);
+	SDL_RenderCopy(gfx_renderer, sdlTexture, &src, NULL);
 	SDL_RenderPresent(gfx_renderer);
 	gfx_redraw = 0;
 }
@@ -623,4 +652,3 @@ void gfx_setPaletteRGB(int index, int r, int g, int b)
 
 	gfx_setpalette();
 }
-

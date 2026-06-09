@@ -8,6 +8,7 @@ int win_getspeed(int framerate);
 void win_setmousemode(int mode);
 void win_enableKeyRepeat(void);
 void win_disableKeyRepeat(void);
+void win_setwindowsize(unsigned xsize, unsigned ysize);
 
 extern float xmouseScale;
 extern float ymouseScale;

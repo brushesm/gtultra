@@ -42,11 +42,32 @@ build-windows.bat
 
 If SDL2 is installed outside the default MinGW search path for the batch script, set `SDL2_PREFIX` first, for example `set SDL2_PREFIX=C:\msys64\mingw64`.
 
-Optional muted MP4 video sync support can be enabled from MSYS2 with FFmpeg:
+Optional muted MP4 video sync support can be enabled from MSYS2 with FFmpeg. This is only required when `GTULTRA_VIDEO=1` is set; normal Windows builds do not need FFmpeg.
+
+For the recommended UCRT64 MSYS2 shell, install the matching development packages:
 
 ```sh
 pacman -S --needed mingw-w64-ucrt-x86_64-ffmpeg mingw-w64-ucrt-x86_64-pkgconf
 GTULTRA_VIDEO=1 ./build-windows-msys2.sh
+```
+
+If you see this error:
+
+```text
+error: FFmpeg development libraries were not found. Install the matching MSYS2 ffmpeg package for your MinGW environment.
+```
+
+then `GTULTRA_VIDEO=1` is enabled but `pkg-config` cannot find the FFmpeg headers/import libraries for the active MSYS2 environment. Install the package set that matches the shell/toolchain you are using:
+
+- UCRT64: `mingw-w64-ucrt-x86_64-ffmpeg mingw-w64-ucrt-x86_64-pkgconf`
+- MINGW64: `mingw-w64-x86_64-ffmpeg mingw-w64-x86_64-pkgconf`
+- CLANG64: `mingw-w64-clang-x86_64-ffmpeg mingw-w64-clang-x86_64-pkgconf`
+
+To build without MP4 support, leave `GTULTRA_VIDEO` unset:
+
+```sh
+unset GTULTRA_VIDEO
+./build-windows-msys2.sh
 ```
 
 From a Windows command prompt, use the same MSYS2 UCRT64 toolchain on `PATH` and set `GTULTRA_VIDEO=1` before running `build-windows.bat`:
@@ -58,6 +79,8 @@ build-windows.bat
 ```
 
 The video-enabled build still needs the MSYS2 FFmpeg development package for headers, import libraries, and `pkg-config`. The repository also carries the matching runtime DLL set in `win32/`, derived from the MSYS2 UCRT64 `mingw-w64-ucrt-x86_64-ffmpeg` package. When `GTULTRA_VIDEO=1`, both Windows build scripts copy every DLL listed in `win32/ffmpeg-runtime-dlls.txt` from `win32/` into `build/windows`.
+
+The vendored `win32/*.dll` files are runtime DLLs only. They do not replace the FFmpeg development headers, import libraries, or `pkg-config` metadata needed to compile a `GTULTRA_VIDEO=1` build.
 
 For a distributable Windows video build, include these files from `build/windows` together:
 

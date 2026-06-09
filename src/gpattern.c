@@ -1086,17 +1086,15 @@ void patterncommands(GTOBJECT *gt, int midiNote)
 	case KEY_RIGHT:
 		if (!shiftOrCtrlPressed)
 		{
-			int maxCh = 6;
-			if (editorInfo.maxSIDChannels == 3 || (editorInfo.maxSIDChannels == 9 && (editorInfo.esnum & 1)))
-				maxCh = 3;
-
 			editorInfo.epcolumn++;
 			if (editorInfo.epcolumn >= 6)
 			{
 				editorInfo.epcolumn = 0;
-				editorInfo.epchn++;
-				if (editorInfo.epchn >= maxCh)
-					editorInfo.epchn = 0;
+				int visualChannel = getEditorVisualPatternChannel() + 1;
+				if (visualChannel >= getVisibleChannelCount())
+					visualChannel = 0;
+				setEditorVisualPatternChannel(visualChannel);
+				c2 = getActualChannel(editorInfo.esnum, editorInfo.epchn);
 				if (editorInfo.eppos > pattlen[gt->editorUndoInfo.editorInfo[c2].epnum])
 					editorInfo.eppos = pattlen[gt->editorUndoInfo.editorInfo[c2].epnum];
 
@@ -1116,13 +1114,12 @@ void patterncommands(GTOBJECT *gt, int midiNote)
 			editorInfo.epcolumn--;
 			if (editorInfo.epcolumn < 0)
 			{
-				int maxCh = 6;
-				if (editorInfo.maxSIDChannels == 3 || (editorInfo.maxSIDChannels == 9 && (editorInfo.esnum & 1)))
-					maxCh = 3;
-
 				editorInfo.epcolumn = 5;
-				editorInfo.epchn--;
-				if (editorInfo.epchn < 0) editorInfo.epchn = maxCh - 1;
+				int visualChannel = getEditorVisualPatternChannel() - 1;
+				if (visualChannel < 0)
+					visualChannel = getVisibleChannelCount() - 1;
+				setEditorVisualPatternChannel(visualChannel);
+				c2 = getActualChannel(editorInfo.esnum, editorInfo.epchn);
 				if (editorInfo.eppos > pattlen[gt->editorUndoInfo.editorInfo[c2].epnum]) editorInfo.eppos = pattlen[gt->editorUndoInfo.editorInfo[c2].epnum];
 				setMasterLoopChannel(gt, "debug_6");
 
@@ -1243,22 +1240,20 @@ void patterncommands(GTOBJECT *gt, int midiNote)
 
 		if (!shiftOrCtrlPressed)
 		{
-			editorInfo.epchn++;
-			int maxCh = 6;
-			if (editorInfo.maxSIDChannels == 3 || (editorInfo.maxSIDChannels == 9 && (editorInfo.esnum & 1)))
-				maxCh = 3;
-
-			if (editorInfo.epchn >= maxCh) editorInfo.epchn = 0;
+			int visualChannel = getEditorVisualPatternChannel() + 1;
+			if (visualChannel >= getVisibleChannelCount())
+				visualChannel = 0;
+			setEditorVisualPatternChannel(visualChannel);
+			c2 = getActualChannel(editorInfo.esnum, editorInfo.epchn);
 			if (editorInfo.eppos > pattlen[gt->editorUndoInfo.editorInfo[c2].epnum]) editorInfo.eppos = pattlen[gt->editorUndoInfo.editorInfo[c2].epnum];
 		}
 		else
 		{
-			editorInfo.epchn--;
-			int maxCh = 6;
-			if (editorInfo.maxSIDChannels == 3 || (editorInfo.maxSIDChannels == 9 && (editorInfo.esnum & 1)))
-				maxCh = 3;
-
-			if (editorInfo.epchn < 0) editorInfo.epchn = maxCh - 1;
+			int visualChannel = getEditorVisualPatternChannel() - 1;
+			if (visualChannel < 0)
+				visualChannel = getVisibleChannelCount() - 1;
+			setEditorVisualPatternChannel(visualChannel);
+			c2 = getActualChannel(editorInfo.esnum, editorInfo.epchn);
 			if (editorInfo.eppos > pattlen[gt->editorUndoInfo.editorInfo[c2].epnum]) editorInfo.eppos = pattlen[gt->editorUndoInfo.editorInfo[c2].epnum];
 		}
 
@@ -2323,5 +2318,4 @@ void clearKeyOns(GTOBJECT *gt, int c2, int i2)
 		};
 	}
 }
-
 

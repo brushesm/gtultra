@@ -41,6 +41,7 @@ int fontheight = 14;
 int mousesizex = 11;
 int mousesizey = 20;
 unsigned bigwindow = 1;
+static int activeScreenColumns = DEFAULT_COLUMNS;
 
 void loadexternalpalette(void);
 void initicon(void);
@@ -69,21 +70,26 @@ int initscreen(void)
 		mousesizey *= 2;
 	}
 
-	unsigned xsize = MAX_COLUMNS * fontwidth;
+	activeScreenColumns = getLayoutColumns();
+	unsigned xsize = activeScreenColumns * fontwidth;
+	unsigned backingxsize = MAX_COLUMNS * fontwidth;
 	unsigned ysize = MAX_ROWS * fontheight;
 
 	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER) < 0)
 		return 0;
-	win_openwindow(xsize, ysize, "GoatTracker Ultra - (Enhanced GoatTracker Stereo V2.76 - Jason Page / MSL)", NULL, enableAntiAlias);
+	if (!win_openwindow(xsize, ysize, "GoatTracker Ultra - (Enhanced GoatTracker Stereo V2.76 - Jason Page / MSL)", NULL, enableAntiAlias))
+		return 0;
 	win_setmousemode(MOUSE_ALWAYS_HIDDEN);
 	initicon();
 
-	if (!gfx_init(xsize, ysize, 60, 0))
+	if (!gfx_init(backingxsize, ysize, 60, 0))
 	{
 		win_fullscreen = 0;
-		if (!gfx_init(xsize, ysize, 60, 0))
+		if (!gfx_init(backingxsize, ysize, 60, 0))
 			return 0;
 	}
+	gfx_setvisiblewidth(xsize);
+	win_setwindowsize(xsize, ysize);
 
 	scrbuffer = (unsigned int*)malloc(MAX_COLUMNS * MAX_ROWS * sizeof(unsigned int));
 	colorbuffer = (unsigned int*)malloc(MAX_COLUMNS * MAX_ROWS * sizeof(unsigned int));
@@ -163,6 +169,29 @@ int initscreen(void)
 	clearscreen(getColor(7, CGENERAL_BACKGROUND));
 	atexit(closescreen);
 	return 1;
+}
+
+int getactivescreencolumns(void)
+{
+	return activeScreenColumns;
+}
+
+void updatescreenlayout(void)
+{
+	int columns = getLayoutColumns();
+	unsigned xsize;
+	unsigned ysize;
+
+	if (columns == activeScreenColumns)
+		return;
+
+	activeScreenColumns = columns;
+	xsize = activeScreenColumns * fontwidth;
+	ysize = MAX_ROWS * fontheight;
+	gfx_setvisiblewidth(xsize);
+	win_setwindowsize(xsize, ysize);
+	clearscreen(getColor(7, CGENERAL_BACKGROUND));
+	forceRedraw();
 }
 
 void loadexternalpalette(void)

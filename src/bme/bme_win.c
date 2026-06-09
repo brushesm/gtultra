@@ -29,6 +29,7 @@ void win_messagebox(char *string);
 void win_checkmessages(void);
 int win_getspeed(int framerate);
 void win_setmousemode(int mode);
+void win_setwindowsize(unsigned xsize, unsigned ysize);
 
 // Global variables
 
@@ -94,10 +95,25 @@ int win_openwindow(unsigned xsize, unsigned ysize, char *appname, char *icon, in
 		SDL_WINDOWPOS_UNDEFINED,
 		xsize, ysize,
 		flags);
+	if (!win_window)
+		return BME_ERROR;
 	return BME_OK;
 }
 
 int keyRepeat = 0;
+void win_setwindowsize(unsigned xsize, unsigned ysize)
+{
+	if (!win_window || !xsize || !ysize)
+		return;
+
+	originalWidth = xsize;
+	originalHeight = ysize;
+	xscale = (float)xsize / (float)ysize;
+	xmouseScale = 1;
+	ymouseScale = 1;
+	SDL_SetWindowSize(win_window, xsize, ysize);
+}
+
 void win_enableKeyRepeat(void)
 {
 	//	if (enableKeyRepeat != 1)

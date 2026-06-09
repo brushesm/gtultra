@@ -123,8 +123,8 @@ int SID::output(short *left, short *right)
 
 	const int range = 1 << 16;
 	const int half = range >> 1;
-	short outL = extfilt.output(0) / ((4095 * 255 >> 7) * 3 * 15 * 2 / range);
-	short outR = extfilt.output(1) / ((4095 * 255 >> 7) * 3 * 15 * 2 / range);
+	int outL = extfilt.output(0) / ((4095 * 255 >> 7) * 3 * 15 * 2 / range);
+	int outR = extfilt.output(1) / ((4095 * 255 >> 7) * 3 * 15 * 2 / range);
 	if (outL >= half) {
 		outL = half - 1;
 	}
@@ -138,8 +138,8 @@ int SID::output(short *left, short *right)
 		outR = -half;
 	}
 
-	*left = outL;
-	*right = outR;
+	*left = static_cast<short>(outL);
+	*right = static_cast<short>(outR);
 
 	return outL;
 }
@@ -163,8 +163,8 @@ int SID::output(int bits, short *left, short *right)
 		outR = -half;
 	}
 
-	*left = outL;
-	*right = outR;
+	*left = static_cast<short>(outL);
+	*right = static_cast<short>(outR);
 
 	return outL;
 }

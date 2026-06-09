@@ -1250,14 +1250,14 @@ void waitkeymouse(GTOBJECT* gt)
 						else
 						{
 							sprintf(&keyOffsetText[0], "                        ");
-							sprintf(infoTextBuffer, keyOffsetText);
+							sprintf(infoTextBuffer, "%s", keyOffsetText);
 						}
 					}
 				}
 				else
 				{
 					calculateNoteOffsets();
-					sprintf(infoTextBuffer, keyOffsetText);
+					sprintf(infoTextBuffer, "%s", keyOffsetText);
 				}
 			}
 		}
@@ -1458,10 +1458,6 @@ void docommand(void)
 void mousecommands(GTOBJECT* gt)
 {
 	int c;
-	int c2 = getActualChannel(editorInfo.esnum, editorInfo.epchn);	// 0-12
-	//	int songNum = getActualSongNumber(editorInfo.esnum, c2);
-	//	int c3 = c % 6;
-
 
 	if (!mouseb)
 	{
@@ -1523,7 +1519,7 @@ void mousecommands(GTOBJECT* gt)
 	*/
 
 	// V1.2.2 Fix - Ensure mouse clicking for 3 channel or 6 channel view is correct for mute + pattern change X positions
-	int patternWidth = 9;
+	int patternWidth = getPatternChannelWidth();
 	int patternTextWidth = 7;
 	int chTextWidth = 2;
 	int chTextPos = 6;
@@ -1538,12 +1534,10 @@ void mousecommands(GTOBJECT* gt)
 
 
 	// Pattern editpos & pattern number selection
-	for (c = 0; c < MAX_CHN; c++)
+	for (c = 0; c < getVisibleChannelCount(); c++)
 	{
-		if (editorInfo.maxSIDChannels == 3 && c >= 3)
-			break;
-		if (editorInfo.maxSIDChannels == 9 && c >= 3 && (editorInfo.esnum & 1))
-			break;
+		int patternActualChannel = getVisualChannelActualChannel(c);
+		int patternLocalChannel = getVisualChannelLocalChannel(c);
 
 		if (mousey == PATTERN_Y)
 		{
@@ -1553,12 +1547,12 @@ void mousecommands(GTOBJECT* gt)
 				{
 					if (mouseb & MOUSEB_LEFT)
 					{
-						editorInfo.epchn = c;
+						setEditorVisualPatternChannel(c);
 						nextpattern(gt);
 					}
 					if (mouseb & MOUSEB_RIGHT)
 					{
-						editorInfo.epchn = c;
+						setEditorVisualPatternChannel(c);
 						prevpattern(gt);
 					}
 				}
@@ -1567,7 +1561,10 @@ void mousecommands(GTOBJECT* gt)
 			{
 
 				if ((mousex >= PATTERN_X + 5 + c * patternWidth) && (mousex <= PATTERN_X + 5 + chTextWidth + c * patternWidth))
-					mutechannel(c, gt);
+				{
+					setEditorVisualPatternChannel(c);
+					mutechannel(patternLocalChannel, gt);
+				}
 			}
 
 		}
@@ -1586,23 +1583,23 @@ void mousecommands(GTOBJECT* gt)
 					int newpos = mousey - PATTERN_Y + 1 + 12 + editorInfo.epview - VISIBLEPATTROWS / 2;
 
 					if (newpos < 0) newpos = 0;
-					if (newpos > pattlen[gt->editorUndoInfo.editorInfo[c2].epnum])
-						newpos = pattlen[gt->editorUndoInfo.editorInfo[c2].epnum];
+					if (newpos > pattlen[gt->editorUndoInfo.editorInfo[patternActualChannel].epnum])
+						newpos = pattlen[gt->editorUndoInfo.editorInfo[patternActualChannel].epnum];
 
 					editorInfo.editmode = EDIT_PATTERN;
 
 					if ((mouseb & (MOUSEB_RIGHT | MOUSEB_MIDDLE)) && (!prevmouseb))
 					{
-						if ((editorInfo.epmarkchn != c) || (newpos != editorInfo.epmarkend))
+						if ((editorInfo.epmarkchn != patternActualChannel) || (newpos != editorInfo.epmarkend))
 						{
-							editorInfo.epmarkchn = c;
+							editorInfo.epmarkchn = patternActualChannel;
 							editorInfo.epmarkstart = editorInfo.epmarkend = newpos;
 						}
 					}
 
 					if (mouseb & MOUSEB_LEFT)
 					{
-						editorInfo.epchn = c;
+						setEditorVisualPatternChannel(c);
 						if (x < 3) editorInfo.epcolumn = 0;
 						if (x >= 3)
 						{
@@ -1632,8 +1629,8 @@ void mousecommands(GTOBJECT* gt)
 					}
 
 					if (editorInfo.eppos < 0) editorInfo.eppos = 0;
-					if (editorInfo.eppos > pattlen[gt->editorUndoInfo.editorInfo[c2].epnum])
-						editorInfo.eppos = pattlen[gt->editorUndoInfo.editorInfo[c2].epnum];
+					if (editorInfo.eppos > pattlen[gt->editorUndoInfo.editorInfo[patternActualChannel].epnum])
+						editorInfo.eppos = pattlen[gt->editorUndoInfo.editorInfo[patternActualChannel].epnum];
 
 					if (mouseb & (MOUSEB_RIGHT | MOUSEB_MIDDLE)) editorInfo.epmarkend = newpos;
 				}
@@ -1642,11 +1639,9 @@ void mousecommands(GTOBJECT* gt)
 	}
 
 
-	int maxCh = 5;
-	if ((editorInfo.maxSIDChannels == 3) || (editorInfo.maxSIDChannels == 9 && (editorInfo.esnum & 1)))
-		maxCh = 2;
+	int maxCh = getVisibleChannelCount() - 1;
 
-	if ((mousey == 2) && (mousex >= 65 && mousex <= 65 + 8) && !prevmouseb && mouseb)
+	if ((mousey == PANEL_ORDER_Y) && (mousex >= PANEL_ORDER_X + 5 && mousex <= PANEL_ORDER_X + 13) && !prevmouseb && mouseb)
 	{
 		int jc2 = getActualChannel(editorInfo.esnum, editorInfo.eschn);	// 0-12 for currently selected channel in orderlist
 
@@ -1693,7 +1688,7 @@ void mousecommands(GTOBJECT* gt)
 
 	//	if (((!prevmouseb) || (mouseheld > HOLDDELAY)) && (mousey == 2) && (mousex >= 64 + 20) && (mousex <= 65 + 20))
 
-	if (!prevmouseb && (mousey == 2) && (mousex >= 64 + 20) && (mousex <= 65 + 20))
+	if (!prevmouseb && (mousey == PANEL_ORDER_Y) && (mousex >= PANEL_ORDER_X + 20) && (mousex <= PANEL_ORDER_X + 21))
 	{
 		if (mouseb & MOUSEB_LEFT) nextsong(gt);
 		if (mouseb & MOUSEB_RIGHT) prevsong(gt);
@@ -3348,9 +3343,9 @@ void highlightInstrument(int t, int instrumentTablePtr)
 			return;	// we've looped to a previously played table slot
 
 		highlightTableBuffer[instrumentTablePtr] = 1;
-		if ((ltable[t][instrumentTablePtr] == 0xff))
+		if (ltable[t][instrumentTablePtr] == 0xff)
 		{
-			if ((rtable[t][instrumentTablePtr] == 0))
+			if (rtable[t][instrumentTablePtr] == 0)
 				break;
 			else
 				instrumentTablePtr = rtable[t][instrumentTablePtr] - 1;
@@ -3846,6 +3841,105 @@ int checkMouseRange(int x, int y, int w, int h)
 	return 0;
 }
 
+static int orderChannelHasPattern(int songNum, int songCh)
+{
+	for (int pos = 0; pos < MAX_SONGLEN; pos++)
+	{
+		int value = songorder[songNum][songCh][pos];
+		if (value >= LOOPSONG)
+			break;
+		if (value < REPEAT)
+			return 1;
+	}
+	return 0;
+}
+
+static void initialiseOrderChannelPattern(GTOBJECT* gt, int songNum, int songCh, int actualChannel, int patternNumber)
+{
+	memset(&songorder[songNum][songCh][0], 0, MAX_SONGLEN + 2);
+	songorder[songNum][songCh][0] = patternNumber;
+	songorder[songNum][songCh][1] = LOOPSONG;
+	songlen[songNum][songCh] = 1;
+
+	clearExpandedSongChannel(songNum, songCh);
+	generateExpandedSongChannel(songNum, songCh);
+	songCompressedSize[songNum][songCh] = generateCompressedSongChannel(songNum, songCh, 1);
+
+	if (actualChannel >= 0 && actualChannel < MAX_PLAY_CH)
+	{
+		gt->editorUndoInfo.editorInfo[actualChannel].epnum = patternNumber;
+		gt->editorUndoInfo.editorInfo[actualChannel].espos = 0;
+		gt->editorUndoInfo.editorInfo[actualChannel].esend = 0;
+	}
+}
+
+static void ensureVisibleSIDChannelPatterns(GTOBJECT* gt)
+{
+	int baseSong = editorInfo.esnum;
+
+	if (editorInfo.maxSIDChannels > MAX_CHN)
+		baseSong &= 0xfffffffe;
+
+	for (int visualChannel = 0; visualChannel < editorInfo.maxSIDChannels && visualChannel < MAX_PLAY_CH; visualChannel++)
+	{
+		int songNum = baseSong;
+		int songCh = visualChannel % MAX_CHN;
+		int patternNumber = visualChannel;
+
+		if (editorInfo.maxSIDChannels > MAX_CHN && visualChannel >= MAX_CHN)
+			songNum++;
+		if (songNum >= MAX_SONGS || patternNumber >= MAX_PATT)
+			continue;
+		if (orderChannelHasPattern(songNum, songCh))
+			continue;
+
+		initialiseOrderChannelPattern(gt, songNum, songCh, visualChannel, patternNumber);
+	}
+}
+
+static void normalizeSIDChannelEditorState(GTOBJECT* gt)
+{
+	int visibleChannels = getVisibleChannelCount();
+	int patternVisualChannel;
+	int orderVisualChannel;
+
+	if (visibleChannels < 1)
+		visibleChannels = 1;
+
+	if (editorInfo.maxSIDChannels <= MAX_CHN)
+		editorInfo.esnum &= 0xfffffffe;
+
+	patternVisualChannel = getEditorVisualPatternChannel();
+	orderVisualChannel = getEditorVisualOrderChannel();
+
+	if (patternVisualChannel >= visibleChannels)
+		patternVisualChannel = visibleChannels - 1;
+	if (orderVisualChannel >= visibleChannels)
+		orderVisualChannel = visibleChannels - 1;
+	if (patternVisualChannel < 0)
+		patternVisualChannel = 0;
+	if (orderVisualChannel < 0)
+		orderVisualChannel = 0;
+
+	if (editorInfo.editmode == EDIT_ORDERLIST)
+	{
+		setEditorVisualPatternChannel(patternVisualChannel);
+		setEditorVisualOrderChannel(orderVisualChannel);
+	}
+	else
+	{
+		setEditorVisualOrderChannel(orderVisualChannel);
+		setEditorVisualPatternChannel(patternVisualChannel);
+	}
+
+	editorInfo.epmarkchn = -1;
+	editorInfo.esmarkchn = -1;
+	editorInfo.esmarkchnend = -1;
+
+	if (gt->masterLoopChannel < 0 || gt->masterLoopChannel >= editorInfo.maxSIDChannels)
+		setMasterLoopChannel(gt, "sid_count_normalize");
+}
+
 void handleSIDChannelCountChange(GTOBJECT* gt)
 {
 	if (gt->songinit != PLAY_STOPPED)
@@ -3858,9 +3952,7 @@ void handleSIDChannelCountChange(GTOBJECT* gt)
 	//		gt->masterLoopChannel = 0;
 
 
-	if (editorInfo.eschn >= editorInfo.maxSIDChannels)
-		editorInfo.eschn = 0;
-
+	normalizeSIDChannelEditorState(gt);
 
 	if ((editorInfo.eseditpos == songlen[editorInfo.esnum][editorInfo.eschn]) || (editorInfo.eseditpos > songlen[editorInfo.esnum][editorInfo.eschn] + 1))
 	{
@@ -3869,6 +3961,7 @@ void handleSIDChannelCountChange(GTOBJECT* gt)
 	}
 	setMasterLoopChannel(gt, "debug_a");
 
+	ensureVisibleSIDChannelPatterns(gt);
 	orderSelectPatternsFromSelected(gt);
 	return;
 
@@ -4928,7 +5021,7 @@ void createFilename(char* filePath, char* newfileName, char* filename)
 void checkForMouseInOrderList(GTOBJECT* gt, int maxCh)
 {
 	// Song editpos & songnumber selection
-	if ((mousey >= 3) && (mousey <= 3 + maxCh) && (mousex >= 40 + 21))
+	if ((mousey >= PANEL_ORDER_Y + 1) && (mousey <= PANEL_ORDER_Y + 1 + maxCh) && (mousex >= PANEL_ORDER_X + 5))
 	{
 		if (editorInfo.editmode != EDIT_ORDERLIST && prevmouseb)	// Don't allow hold/drag to select another panel
 			return;
@@ -4936,9 +5029,11 @@ void checkForMouseInOrderList(GTOBJECT* gt, int maxCh)
 		if (!mouseb)
 			return;
 
-		int newpos = editorInfo.esview + (mousex - 44 - 21) / 3;
-		int newcolumn = (mousex - 44 - 21) % 3;
-		int newchn = mousey - 3;
+		int newpos = editorInfo.esview + (mousex - (PANEL_ORDER_X + 5)) / 3;
+		int newcolumn = (mousex - (PANEL_ORDER_X + 5)) % 3;
+		int newchn = mousey - (PANEL_ORDER_Y + 1);
+		int songNum = getVisualChannelSongNumber(newchn);
+		int songCh = getVisualChannelLocalChannel(newchn);
 		if (newcolumn < 0) newcolumn = 0;
 		if (newcolumn > 1) newcolumn = 1;
 		if (newpos < 0)
@@ -4946,25 +5041,26 @@ void checkForMouseInOrderList(GTOBJECT* gt, int maxCh)
 			newpos = 0;
 			newcolumn = 0;
 		}
-		if (newpos == songlen[editorInfo.esnum][editorInfo.eschn])
+		if (newpos == songlen[songNum][songCh])
 		{
 			newpos++;
 			newcolumn = 0;
 		}
-		if (newpos > songlen[editorInfo.esnum][editorInfo.eschn] + 1)
+		if (newpos > songlen[songNum][songCh] + 1)
 		{
-			newpos = songlen[editorInfo.esnum][editorInfo.eschn] + 1;
+			newpos = songlen[songNum][songCh] + 1;
 			newcolumn = 1;
 		}
 
 		editorInfo.editmode = EDIT_ORDERLIST;
 
-		if ((mouseb & (MOUSEB_RIGHT | MOUSEB_MIDDLE)) && (!prevmouseb) && (newpos < songlen[editorInfo.esnum][editorInfo.eschn]))
+		if ((mouseb & (MOUSEB_RIGHT | MOUSEB_MIDDLE)) && (!prevmouseb) && (newpos < songlen[songNum][songCh]))
 		{
+			setEditorVisualOrderChannel(newchn);
 
-			if ((editorInfo.esmarkchn != newchn) || (newpos != editorInfo.esmarkend))
+			if ((editorInfo.esmarkchn != editorInfo.eschn) || (newpos != editorInfo.esmarkend))
 			{
-				editorInfo.esmarkchn = newchn;
+				editorInfo.esmarkchn = editorInfo.eschn;
 				editorInfo.esmarkstart = editorInfo.esmarkend = newpos;
 			}
 
@@ -4977,7 +5073,7 @@ void checkForMouseInOrderList(GTOBJECT* gt, int maxCh)
 
 			if (((mouseheld > HOLDDELAY) || (s != 0)) && !editPaletteMode)
 			{
-				editorInfo.eschn = newchn;
+				setEditorVisualOrderChannel(newchn);
 				editorInfo.eseditpos = newpos;
 				editorInfo.escolumn = newcolumn;
 				setMasterLoopChannel(gt, "debug_b");
@@ -4988,7 +5084,7 @@ void checkForMouseInOrderList(GTOBJECT* gt, int maxCh)
 			else if (m && !editPaletteMode)	// double click?
 			{
 
-				editorInfo.eschn = newchn;
+				setEditorVisualOrderChannel(newchn);
 				editorInfo.eseditpos = newpos;
 				editorInfo.escolumn = newcolumn;
 				setMasterLoopChannel(gt, "debug_f");
@@ -4996,7 +5092,7 @@ void checkForMouseInOrderList(GTOBJECT* gt, int maxCh)
 			}
 			else
 			{
-				editorInfo.eschn = newchn;
+				setEditorVisualOrderChannel(newchn);
 				editorInfo.eseditpos = newpos;
 				editorInfo.escolumn = newcolumn;
 
@@ -5004,7 +5100,7 @@ void checkForMouseInOrderList(GTOBJECT* gt, int maxCh)
 			}
 		}
 
-		if ((mouseb & (MOUSEB_RIGHT | MOUSEB_MIDDLE)) && (newpos < songlen[editorInfo.esnum][editorInfo.eschn]))
+		if ((mouseb & (MOUSEB_RIGHT | MOUSEB_MIDDLE)) && (newpos < songlen[songNum][songCh]))
 			editorInfo.esmarkend = newpos;
 	}
 }
@@ -5021,21 +5117,26 @@ void validateStereoMode()
 
 
 
-char backupFolderName[MAX_FILENAME];
+char backupFolderName[MAX_PATHNAME];
 
 void saveBackupSong()
 {
-	createBackupFolder();
+	if (!createBackupFolder())
+		return;
 
 	time_t mytime = time(NULL);
 	char* time_str = ctime(&mytime);
+	if (time_str == NULL)
+		return;
 	time_str[strlen(time_str) - 1] = '\0';
 	replacechar(time_str, ':', '_');
 
-	strcpy(backupSngFilename, backupFolderName);
-	strcat(backupSngFilename, "/GTUltra_");
-	strcat(backupSngFilename, time_str);
-	strcat(backupSngFilename, ".sng");
+	int result = snprintf(backupSngFilename, sizeof backupSngFilename, "%s/GTUltra_%s.sng", backupFolderName, time_str);
+	if ((result < 0) || (result >= (int)sizeof backupSngFilename))
+	{
+		SDL_Log("Backup filename is too long; skipping backup save.\n");
+		return;
+	}
 
 	strcpy(tempSngFilename, songfilename);
 	strcpy(songfilename, backupSngFilename);
@@ -5063,6 +5164,7 @@ int createBackupFolder()
 {
 
 	DIR* folder;
+	int result;
 
 	memset(backupFolderName, '\0', sizeof(backupFolderName));
 
@@ -5070,20 +5172,32 @@ int createBackupFolder()
 #ifdef __WIN32__
 	createFilename(appFileName, backupFolderName, "gtbackup");
 #else
-	strcpy(backupFolderName, getenv("HOME"));
-	strcat(backupFolderName, "/.goattrk/gtbackup");
+	const char* home = getenv("HOME");
+	if (home == NULL || home[0] == '\0')
+	{
+		SDL_Log("HOME is not set; skipping backup save.\n");
+		return 0;
+	}
+	result = snprintf(backupFolderName, sizeof backupFolderName, "%s/.goattrk/gtbackup", home);
+	if ((result < 0) || (result >= (int)sizeof backupFolderName))
+	{
+		SDL_Log("Backup folder path is too long; skipping backup save.\n");
+		backupFolderName[0] = '\0';
+		return 0;
+	}
 #endif
 
 	folder = opendir(backupFolderName);
 	if (folder == NULL)
 	{
 #ifdef __WIN32__
-		mkdir(backupFolderName);	// default backup folder didn't exist in config file location. It does now..
+		result = mkdir(backupFolderName);	// default backup folder didn't exist in config file location. It does now..
 #else
-		mkdir(backupFolderName, 0777);
+		result = mkdir(backupFolderName, 0777);
 #endif
-		return 0;
+		return result == 0;
 	}
+	closedir(folder);
 	return 1;
 
 }
@@ -5110,6 +5224,8 @@ void checkForMouseInExtendedOrderList(GTOBJECT* gt, int maxCh)
 		//			newcolumn--;
 
 		int newchn = (mousex - (PANEL_ORDER_X + 4)) / 6;
+		int songNum = getVisualChannelSongNumber(newchn);
+		int songCh = getVisualChannelLocalChannel(newchn);
 
 		if (newpos < 0)
 		{
@@ -5127,7 +5243,7 @@ void checkForMouseInExtendedOrderList(GTOBJECT* gt, int maxCh)
 			return;
 		}
 
-		if (songOrderPatterns[editorInfo.esnum][newchn][newpos] < 0xff)
+		if (songOrderPatterns[songNum][songCh][newpos] < 0xff)
 		{
 			if (newcolumn == 2)	// is cursor in the gap between pattern and transpose? if so, move it left
 			{
@@ -5140,10 +5256,11 @@ void checkForMouseInExtendedOrderList(GTOBJECT* gt, int maxCh)
 
 		if ((mouseb & (MOUSEB_RIGHT | MOUSEB_MIDDLE)) && (!prevmouseb) && (newpos < MAX_SONGLEN_EXPANDED))	//< songOrderLength[editorInfo.esnum][editorInfo.eschn]))
 		{
+			setEditorVisualOrderChannel(newchn);
 
-			if ((editorInfo.esmarkchn != newchn) || (newpos != editorInfo.esmarkend))
+			if ((editorInfo.esmarkchn != editorInfo.eschn) || (newpos != editorInfo.esmarkend))
 			{
-				editorInfo.esmarkchn = newchn;
+				editorInfo.esmarkchn = editorInfo.eschn;
 				editorInfo.esmarkstart = editorInfo.esmarkend = newpos;
 				selectingInOrderList = 1;
 				selectingInOrderListDeltaTime = 0;
@@ -5160,7 +5277,7 @@ void checkForMouseInExtendedOrderList(GTOBJECT* gt, int maxCh)
 			{
 				if (editorInfo.eseditpos == newpos)
 				{
-					editorInfo.eschn = newchn;
+					setEditorVisualOrderChannel(newchn);
 					editorInfo.eseditpos = newpos;
 					editorInfo.escolumn = newcolumn;
 					setMasterLoopChannel(gt, "debug_d");
@@ -5171,7 +5288,7 @@ void checkForMouseInExtendedOrderList(GTOBJECT* gt, int maxCh)
 				else
 				{
 					mouseheld = 0;
-					editorInfo.eschn = newchn;
+					setEditorVisualOrderChannel(newchn);
 					editorInfo.eseditpos = newpos;
 					editorInfo.escolumn = newcolumn;
 				}
@@ -5179,7 +5296,7 @@ void checkForMouseInExtendedOrderList(GTOBJECT* gt, int maxCh)
 			else if (m && !editPaletteMode)	// double click?
 			{
 
-				editorInfo.eschn = newchn;
+				setEditorVisualOrderChannel(newchn);
 				editorInfo.eseditpos = newpos;
 				editorInfo.escolumn = newcolumn;
 				setMasterLoopChannel(gt, "debug_g");
@@ -5190,7 +5307,7 @@ void checkForMouseInExtendedOrderList(GTOBJECT* gt, int maxCh)
 			{
 				if (editorInfo.eseditpos != newpos)
 					mouseheld = 0;
-				editorInfo.eschn = newchn;
+				setEditorVisualOrderChannel(newchn);
 				editorInfo.eseditpos = newpos;
 				editorInfo.escolumn = newcolumn;
 
@@ -5203,7 +5320,7 @@ void checkForMouseInExtendedOrderList(GTOBJECT* gt, int maxCh)
 			if (editorInfo.esmarkchn != -1)	// are we currently selecting?
 			{
 				editorInfo.esmarkend = newpos;
-				editorInfo.esmarkchnend = newchn;
+				editorInfo.esmarkchnend = songCh;
 			}
 		}
 	}

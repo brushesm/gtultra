@@ -1,7 +1,8 @@
 #ifndef GCONSOLE_H
 #define GCONSOLE_H
 
-#define MAX_COLUMNS 100
+#define MAX_COLUMNS 200
+#define DEFAULT_COLUMNS 100
 #define MAX_ROWS 41
 #define HOLDDELAY 24
 #define DOUBLECLICKDELAY 15
@@ -28,6 +29,8 @@ void printbytecol(int x, int y, int color, unsigned int b, int length);
 void modifyChars();
 int getColor(int fcolor, int bcolor);
 void forceRedraw();
+void updatescreenlayout(void);
+int getactivescreencolumns(void);
 
 #ifndef GCONSOLE_C
 extern int key, rawkey, shiftpressed, cursorflashdelay, ctrlpressed;

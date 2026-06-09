@@ -80,10 +80,10 @@ int patternOrderList[256];
 int patternRemapOrderIndex;
 
 char configbuf[MAX_PATHNAME];
-char loadedsongfilename[MAX_FILENAME];
+char loadedsongfilename[MAX_PATHNAME];
 char wavfilename[MAX_PATHNAME];
 char videofilename[MAX_PATHNAME];
-char songfilename[MAX_FILENAME];
+char songfilename[MAX_PATHNAME];
 char songfilter[MAX_FILENAME];
 char wavfilter[MAX_FILENAME];
 char videofilter[MAX_FILENAME];
@@ -223,6 +223,14 @@ int main(int argc, char **argv)
 
 	// get input- and output file names
 	if (argc >= 3) {
+		if (strlen(argv[1]) >= sizeof songfilename) {
+			fprintf(STDERR, "error: song filename is too long.\n");
+			exit(-1);
+		}
+		if (strlen(argv[2]) >= sizeof packedsongname) {
+			fprintf(STDERR, "error: output filename is too long.\n");
+			exit(-1);
+		}
 		strcpy(songfilename, argv[1]);
 		strcpy(packedsongname, argv[2]);
 	}
