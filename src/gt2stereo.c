@@ -134,8 +134,10 @@ int displayStopped = 0;
 char configbuf[MAX_PATHNAME];
 char loadedsongfilename[MAX_PATHNAME]; // JP was MAX_FILENAME
 char wavfilename[MAX_PATHNAME];
+char videofilename[MAX_PATHNAME];
 char songfilename[MAX_PATHNAME];	// JP was MAX_FILENAME
 char wavfilter[MAX_FILENAME];
+char videofilter[MAX_FILENAME];
 char songfilter[MAX_FILENAME];
 char songpath[MAX_PATHNAME];
 char instrfilename[MAX_FILENAME];
@@ -852,6 +854,7 @@ int main(int argc, char** argv)
 
 	// Shutdown sound output now
 	sound_uninit();
+	gt_video_close();
 
 	/*
 	#ifndef __WIN32__
@@ -1038,6 +1041,7 @@ void waitkey(GTOBJECT* gt)
 		{
 			displayupdate(gt);
 		}
+		gt_video_tick(gt);
 		getkey();
 		if ((rawkey) || (key)) break;
 		if (win_quitted) break;
@@ -1106,6 +1110,7 @@ void waitkeymouse(GTOBJECT* gt)
 
 		if (!jdebugPlaying)
 			displayupdate(gt);
+		gt_video_tick(gt);
 
 		getkey();
 		if (mouseb)
@@ -2354,7 +2359,19 @@ void generalcommands(GTOBJECT* gt)
 
 	case KEY_F10:
 
-		handleLoad(gt, NULL);
+		if (ctrlpressed)
+		{
+			if (shiftpressed)
+			{
+				gt_video_close();
+				snprintf(infoTextBuffer, sizeof infoTextBuffer, "Video closed");
+				forceInfoLine = 1;
+			}
+			else
+				handleLoadVideo(gt);
+		}
+		else
+			handleLoad(gt, NULL);
 		break;
 
 	case KEY_F11:
@@ -5271,4 +5288,29 @@ void handleLoad(GTOBJECT* gt, char* dragdropfile)
 	restartScreenDisplay();
 
 
+}
+
+void handleLoadVideo(GTOBJECT* gt)
+{
+	if (!gt_video_enabled())
+	{
+		snprintf(infoTextBuffer, sizeof infoTextBuffer, "Video support not enabled in this build");
+		forceInfoLine = 1;
+		return;
+	}
+
+	stopScreenDisplay();
+
+	if (fileselector(videofilename, songpath, videofilter, "LOAD MP4 VIDEO", 0, gt, CEDIT, 0))
+	{
+		if (gt_video_load(videofilename))
+			snprintf(infoTextBuffer, sizeof infoTextBuffer, "Video Loaded:%s", videofilename);
+		else
+			snprintf(infoTextBuffer, sizeof infoTextBuffer, "Video Load Failed:%s", videofilename);
+		forceInfoLine = 1;
+	}
+
+	restartScreenDisplay();
+	key = 0;
+	rawkey = 0;
 }

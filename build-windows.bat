@@ -37,6 +37,14 @@ call :require_tool gcc "Install MSYS2 MinGW gcc and add mingw64\bin or ucrt64\bi
 call :require_tool g++ "Install MSYS2 MinGW g++ and add mingw64\bin or ucrt64\bin to PATH." || exit /b 1
 call :require_tool windres "Install MinGW binutils and add mingw64\bin or ucrt64\bin to PATH." || exit /b 1
 call :require_tool strip "Install MinGW binutils and add mingw64\bin or ucrt64\bin to PATH." || exit /b 1
+if "%GTULTRA_VIDEO%"=="1" (
+    call :require_tool pkg-config "Install MSYS2 MinGW pkg-config and FFmpeg development libraries, then add mingw64\bin or ucrt64\bin to PATH." || exit /b 1
+    pkg-config --exists libavformat libavcodec libavutil libswscale
+    if errorlevel 1 (
+        echo error: FFmpeg development libraries were not found by pkg-config. 1>&2
+        exit /b 1
+    )
+)
 
 if /I "%TARGET%"=="clean" goto clean
 
@@ -52,9 +60,9 @@ echo Building GTUltra Windows binaries...
 pushd "%SRC_DIR%" || exit /b 1
 if not "%SDL2_PREFIX%"=="" (
     set "SDL_LIBS=-L%SDL2_PREFIX%\lib -lmingw32 -mwindows -lSDL2main -lSDL2 -lwinmm -lsetupapi -lole32 -loleaut32 -limm32 -lversion -lcfgmgr32 -static-libstdc++ -static-libgcc -static"
-    "%MAKE_CMD%" -f makefile.win PREFIX=../build/windows/ DATAFILE=./bme/datafile.exe DAT2INC=./bme/dat2inc.exe "CFLAGS=-std=gnu17 -Ibme -Iasm -O3 -Wall" "LIBS=%SDL_LIBS%"
+    "%MAKE_CMD%" -f makefile.win PREFIX=../build/windows/ DATAFILE=./bme/datafile.exe DAT2INC=./bme/dat2inc.exe GTULTRA_VIDEO=%GTULTRA_VIDEO% "CFLAGS=-std=gnu17 -Ibme -Iasm -O3 -Wall" "LIBS=%SDL_LIBS%"
 ) else (
-    "%MAKE_CMD%" -f makefile.win PREFIX=../build/windows/ DATAFILE=./bme/datafile.exe DAT2INC=./bme/dat2inc.exe "CFLAGS=-std=gnu17 -Ibme -Iasm -O3 -Wall" "LIBS=-lmingw32 -mwindows -lSDL2main -lSDL2 -lwinmm -lsetupapi -lole32 -loleaut32 -limm32 -lversion -lcfgmgr32 -static-libstdc++ -static-libgcc -static"
+    "%MAKE_CMD%" -f makefile.win PREFIX=../build/windows/ DATAFILE=./bme/datafile.exe DAT2INC=./bme/dat2inc.exe GTULTRA_VIDEO=%GTULTRA_VIDEO% "CFLAGS=-std=gnu17 -Ibme -Iasm -O3 -Wall" "LIBS=-lmingw32 -mwindows -lSDL2main -lSDL2 -lwinmm -lsetupapi -lole32 -loleaut32 -limm32 -lversion -lcfgmgr32 -static-libstdc++ -static-libgcc -static"
 )
 if errorlevel 1 exit /b 1
 popd
@@ -76,9 +84,32 @@ if "%SDL_DLL_COPIED%"=="0" (
     echo warning: SDL2.dll was not found. Copy it beside gtultra.exe before running. 1>&2
 )
 
+if "%GTULTRA_VIDEO%"=="1" (
+    call :copy_ffmpeg_runtime
+)
+
 if exist "%ROOT%win32\gtultra.cfg" copy /Y "%ROOT%win32\gtultra.cfg" "%OUT_DIR%\gtultra.cfg" >nul
 
 echo Built Windows binaries in "%OUT_DIR%".
+exit /b 0
+
+:copy_ffmpeg_runtime
+set "FFMPEG_RUNTIME_LIST=%ROOT%win32\ffmpeg-runtime-dlls.txt"
+if not exist "%FFMPEG_RUNTIME_LIST%" (
+    echo warning: %FFMPEG_RUNTIME_LIST% was not found. Copy FFmpeg DLLs beside gtultra.exe before running. 1>&2
+    exit /b 0
+)
+for /F "usebackq delims=" %%D in ("%FFMPEG_RUNTIME_LIST%") do (
+    if exist "%ROOT%win32\%%D" (
+        copy /Y "%ROOT%win32\%%D" "%OUT_DIR%\%%D" >nul
+    )
+    if not exist "%OUT_DIR%\%%D" if not "%FFMPEG_PREFIX%"=="" if exist "%FFMPEG_PREFIX%\bin\%%D" (
+        copy /Y "%FFMPEG_PREFIX%\bin\%%D" "%OUT_DIR%\%%D" >nul
+    )
+    if not exist "%OUT_DIR%\%%D" (
+        echo warning: FFmpeg runtime DLL %%D was not found. 1>&2
+    )
+)
 exit /b 0
 
 :clean
@@ -117,9 +148,14 @@ echo Requirements:
 echo   - MSYS2 MinGW or another MinGW-w64 toolchain on PATH
 echo   - GNU make, gcc, g++, windres, strip
 echo   - SDL2 MinGW development libraries
+echo   - Optional MP4 video support: FFmpeg development libraries and pkg-config
 echo.
 echo If SDL2 is not on the default MinGW library path, set SDL2_PREFIX first:
 echo   set SDL2_PREFIX=C:\msys64\mingw64
+echo.
+echo To build optional muted MP4 video support:
+echo   set GTULTRA_VIDEO=1
+echo   set FFMPEG_PREFIX=C:\msys64\ucrt64
 exit /b 0
 
 :bad_args

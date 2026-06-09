@@ -10,6 +10,9 @@ Builds GTUltra for macOS into build/macos.
 Requirements:
   - Xcode command line tools
   - SDL2 development package, for example: brew install sdl2
+  - Optional MP4 video support: brew install ffmpeg pkg-config
+
+Set GTULTRA_VIDEO=1 to build optional muted MP4 video playback support.
 USAGE
 }
 
@@ -42,6 +45,17 @@ fi
 if ! command -v cc >/dev/null 2>&1; then
     echo "error: cc was not found. Install the Xcode command line tools." >&2
     exit 1
+fi
+
+if [[ "${GTULTRA_VIDEO:-0}" == "1" ]]; then
+    if ! command -v pkg-config >/dev/null 2>&1; then
+        echo "error: pkg-config was not found. Install optional video dependencies with: brew install ffmpeg pkg-config" >&2
+        exit 1
+    fi
+    if ! pkg-config --exists libavformat libavcodec libavutil libswscale; then
+        echo "error: FFmpeg development libraries were not found. Install them with: brew install ffmpeg" >&2
+        exit 1
+    fi
 fi
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -79,6 +93,9 @@ build_host_tool() {
     build_host_tool dat2inc dat2inc.c
     build_host_tool datafile -I. -ISDL datafile.c bme_end.c
 )
+
+echo "Removing stale object files from previous non-macOS builds..."
+find "$SRC_DIR" -name '*.o' -type f -delete
 
 (
     cd "$SRC_DIR"

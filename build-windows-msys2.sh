@@ -10,6 +10,10 @@ Builds GTUltra, gtasm, and gtultra2raster for Windows into build/windows from an
 Requirements:
   pacman -S --needed base-devel mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-SDL2
 
+Optional MP4 video support:
+  pacman -S --needed mingw-w64-ucrt-x86_64-ffmpeg mingw-w64-ucrt-x86_64-pkgconf
+  GTULTRA_VIDEO=1 ./build-windows-msys2.sh
+
 The script also works with mingw64 or clang64 toolchains if those are installed.
 USAGE
 }
@@ -123,6 +127,39 @@ copy_runtime_files() {
     if [[ -f "$root_dir/win32/gtultra.cfg" ]]; then
         cp -f "$root_dir/win32/gtultra.cfg" "$out_dir/gtultra.cfg"
     fi
+
+	if [[ "${GTULTRA_VIDEO:-0}" == "1" ]]; then
+		local copied
+		local dll
+		local dll_list="$root_dir/win32/ffmpeg-runtime-dlls.txt"
+		local prefix
+
+		if [[ ! -f "$dll_list" ]]; then
+			echo "warning: $dll_list was not found. Copy FFmpeg DLLs beside gtultra.exe before running." >&2
+			return
+		fi
+
+		while IFS= read -r dll; do
+			[[ -n "$dll" ]] || continue
+			if [[ -f "$root_dir/win32/$dll" ]]; then
+				cp -f "$root_dir/win32/$dll" "$out_dir/$dll"
+				continue
+			fi
+
+			copied=0
+			for prefix in "${MINGW_PREFIX:-}" /ucrt64 /mingw64 /clang64 /clangarm64 /mingw32; do
+				[[ -n "$prefix" ]] || continue
+				if [[ -f "$prefix/bin/$dll" ]]; then
+					cp -f "$prefix/bin/$dll" "$out_dir/$dll"
+					copied=1
+					break
+				fi
+			done
+			if [[ "$copied" == "0" ]]; then
+				echo "warning: FFmpeg runtime DLL $dll was not found." >&2
+			fi
+		done < "$dll_list"
+	fi
 }
 
 activate_mingw_toolchain
@@ -131,6 +168,14 @@ require_tool gcc
 require_tool g++
 require_tool windres
 require_tool strip
+
+if [[ "${GTULTRA_VIDEO:-0}" == "1" ]]; then
+    require_tool pkg-config
+    if ! pkg-config --exists libavformat libavcodec libavutil libswscale; then
+        echo "error: FFmpeg development libraries were not found. Install the matching MSYS2 ffmpeg package for your MinGW environment." >&2
+        exit 1
+    fi
+fi
 
 if [[ "$target" == "clean" ]]; then
     echo "Cleaning Windows build outputs..."
@@ -164,6 +209,7 @@ echo "Building GTUltra Windows binaries..."
         PREFIX=../build/windows/ \
         DATAFILE=./bme/datafile.exe \
         DAT2INC=./bme/dat2inc.exe \
+        GTULTRA_VIDEO="${GTULTRA_VIDEO:-0}" \
         "CFLAGS=-std=gnu17 -Ibme -Iasm -O3 -Wall" \
         "LIBS=$libs"
 )

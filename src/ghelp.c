@@ -39,6 +39,7 @@ void onlinehelp(int standalone,int context,GTOBJECT *gt)
     "SHIFT+F8 Switch between 6581/8580 SID",
     "SHIFT+F9 Switch between mono and stereo",
     "SHIFT+F10 Merge-load song",
+    "CTRL+F10 Load MP4 video",
     "SHIFT+, . Move song startpos & restart",
     "TAB Cycle between editing modes",
     "INS Insert row (Press on endmark to",
@@ -405,4 +406,3 @@ void onlinehelp(int standalone,int context,GTOBJECT *gt)
     rawkey = 0;
   }
 }
-

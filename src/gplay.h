@@ -81,7 +81,7 @@ typedef struct
 	unsigned char filterptr;	// = 0;
 }FILTERINFO;
 
-typedef struct 
+typedef struct GTOBJECT
 {
 	char *sidreg[4];
 	FILTERINFO filterInfo[4];	

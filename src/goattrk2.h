@@ -18,6 +18,7 @@
 #include "gcommon.h"
 #include "gconsole.h"
 #include "gplay.h"
+#include "gvideo.h"
 #include "gsound.h"
 #include "gsid.h"
 #include "gsong.h"
@@ -116,9 +117,11 @@ extern float basepitch;
 extern char configbuf[MAX_PATHNAME];
 extern char loadedsongfilename[MAX_PATHNAME];
 extern char wavfilename[MAX_PATHNAME];
+extern char videofilename[MAX_PATHNAME];
 extern char songfilename[MAX_PATHNAME];
 extern char songfilter[MAX_FILENAME];
 extern char wavfilter[MAX_FILENAME];
+extern char videofilter[MAX_FILENAME];
 extern char songpath[MAX_PATHNAME];
 extern char instrfilename[MAX_FILENAME];
 extern char instrfilter[MAX_FILENAME];
@@ -278,6 +281,7 @@ void swapPalettes(int p1, int p2);
 void handlePressRewind(int doubleClick, GTOBJECT *gt);
 void createFilename(char *filePath, char *newfileName, char *filename);
 void backupPatternDisplayInfo(GTOBJECT *gt);
+void handleLoadVideo(GTOBJECT *gt);
 void restorePatternDisplayInfo(GTOBJECT *gt);
 void reInitSID();
 void validateStereoMode();

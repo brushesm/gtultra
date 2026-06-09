@@ -1,0 +1,19 @@
+FFmpeg Windows runtime
+======================
+
+The DLLs listed in ffmpeg-runtime-dlls.txt are the runtime closure used by
+GTUltra video-enabled Windows distributions.
+
+Source package:
+  MSYS2 UCRT64 mingw-w64-ucrt-x86_64-ffmpeg 8.1.1-2
+  https://repo.msys2.org/mingw/ucrt64/
+
+Package metadata license:
+  spdx:GPL-3.0-or-later
+
+These files are runtime DLLs only. Building GTUltra with GTULTRA_VIDEO=1 still
+requires FFmpeg development headers, import libraries, and pkg-config from the
+matching MSYS2 UCRT64 environment.
+
+When refreshing this runtime set, keep ffmpeg-runtime-dlls.txt in sync with the
+DLLs that must be copied beside gtultra.exe.

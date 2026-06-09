@@ -13,6 +13,7 @@
 #include "bme_io.h"
 #include "bme_err.h"
 #include "bme_cfg.h"
+#include "../gvideo.h"
 
 SDL_Joystick *joy[MAX_JOYSTICKS] = { NULL };
 Sint16 joyx[MAX_JOYSTICKS];
@@ -192,6 +193,9 @@ void win_checkmessages(void)
 
 	while (SDL_PollEvent(&event))
 	{
+		if (gt_video_handle_sdl_event(&event))
+			continue;
+
 		switch (event.type)
 		{
 
@@ -205,7 +209,7 @@ void win_checkmessages(void)
 
 		case SDL_WINDOWEVENT:
 
-			if (event.window.event == SDL_WINDOWEVENT_RESIZED) {
+			if (win_window && event.window.windowID == SDL_GetWindowID(win_window) && event.window.event == SDL_WINDOWEVENT_RESIZED) {
 				float xsize = (float)event.window.data2*xscale;
 				SDL_SetWindowSize(win_window, xsize, event.window.data2);
 				gfx_resize(xsize, event.window.data2);
@@ -213,6 +217,7 @@ void win_checkmessages(void)
 				xmouseScale = originalWidth / xsize;
 				ymouseScale = originalHeight / (float)event.window.data2;
 			}
+			break;
 
 		case SDL_JOYBUTTONDOWN:
 			joybuttons[event.jbutton.which] |= 1 << event.jbutton.button;
@@ -350,4 +355,3 @@ void win_setmousemode(int mode)
 		break;
 	}
 }
-

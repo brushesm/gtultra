@@ -21,12 +21,14 @@ void initpaths(void)
 
 	memset(loadedsongfilename, 0, sizeof loadedsongfilename);
 	memset(songfilename, 0, sizeof songfilename);
+	memset(videofilename, 0, sizeof videofilename);
 	memset(instrfilename, 0, sizeof instrfilename);
 	memset(songpath, 0, sizeof songpath);
 	memset(instrpath, 0, sizeof instrpath);
 	memset(packedpath, 0, sizeof packedpath);
 	strcpy(songfilter, "*.sng");
 	strcpy(wavfilter, "*.wav");
+	strcpy(videofilter, "*.mp4");
 	strcpy(instrfilter, "*.ins");
 	strcpy(palettefilter, "*.gtp");
 
@@ -655,4 +657,3 @@ int cmpname(char *string1, char *string2)
 		if ((!char1) || (!char2)) return 0;
 	}
 }
-

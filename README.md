@@ -11,6 +11,13 @@ brew install sdl2
 
 The script writes binaries to `build/macos` so local builds do not overwrite the tracked release binaries in `mac/`.
 
+Optional muted MP4 video sync support can be enabled with FFmpeg:
+
+```sh
+brew install ffmpeg pkg-config
+GTULTRA_VIDEO=1 ./build-macos.sh
+```
+
 ## Building on Windows
 
 Install MSYS2 MinGW with GCC, GNU Make, binutils, and SDL2 development libraries:
@@ -34,6 +41,41 @@ build-windows.bat
 ```
 
 If SDL2 is installed outside the default MinGW search path for the batch script, set `SDL2_PREFIX` first, for example `set SDL2_PREFIX=C:\msys64\mingw64`.
+
+Optional muted MP4 video sync support can be enabled from MSYS2 with FFmpeg:
+
+```sh
+pacman -S --needed mingw-w64-ucrt-x86_64-ffmpeg mingw-w64-ucrt-x86_64-pkgconf
+GTULTRA_VIDEO=1 ./build-windows-msys2.sh
+```
+
+From a Windows command prompt, use the same MSYS2 UCRT64 toolchain on `PATH` and set `GTULTRA_VIDEO=1` before running `build-windows.bat`:
+
+```bat
+set PATH=C:\msys64\ucrt64\bin;%PATH%
+set GTULTRA_VIDEO=1
+build-windows.bat
+```
+
+The video-enabled build still needs the MSYS2 FFmpeg development package for headers, import libraries, and `pkg-config`. The repository also carries the matching runtime DLL set in `win32/`, derived from the MSYS2 UCRT64 `mingw-w64-ucrt-x86_64-ffmpeg` package. When `GTULTRA_VIDEO=1`, both Windows build scripts copy every DLL listed in `win32/ffmpeg-runtime-dlls.txt` from `win32/` into `build/windows`.
+
+For a distributable Windows video build, include these files from `build/windows` together:
+
+- `gtultra.exe`
+- `gtultra.cfg`
+- `SDL2.dll`
+- every FFmpeg/runtime DLL copied from `win32/ffmpeg-runtime-dlls.txt`
+
+If you intentionally refresh FFmpeg to a different MSYS2 package version, replace the DLLs in `win32/`, update `win32/ffmpeg-runtime-dlls.txt`, and rebuild. `FFMPEG_PREFIX` is only a fallback for missing vendored DLLs or for a deliberate refresh, for example `set FFMPEG_PREFIX=C:\msys64\ucrt64`.
+
+## Optional MP4 Video Sync
+
+When built with `GTULTRA_VIDEO=1`, GTUltra can load a muted MP4 reference video in a separate SDL window. Music playback remains the master clock: video follows play, stop, restart, seek, rewind, fast-forward, and pattern loop resets.
+
+- `Ctrl+F10`: load an MP4 video for the current session.
+- `Ctrl+Shift+F10`: close the video window.
+- Dragging an `.mp4` or `.m4v` file into GTUltra also loads it as video.
+- Video paths are not saved in `.sng` files or `gtultra.cfg`.
 
 ## GTUltra to 1raster Conversion
 

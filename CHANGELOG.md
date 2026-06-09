@@ -9,6 +9,9 @@ and this project follows the existing GTUltra/GoatTracker versioning scheme.
 
 ### Added
 
+- Added optional `GTULTRA_VIDEO=1` MP4 video sync support using FFmpeg/libav and a separate muted SDL video window.
+- Added `Ctrl+F10` to load a session-only MP4 video and `Ctrl+Shift+F10` to close the video window in video-enabled builds.
+- Added vendored MSYS2 UCRT64 FFmpeg runtime DLLs under `win32/` with `win32/ffmpeg-runtime-dlls.txt` for Windows video-enabled distributions.
 - Added `gtultra2raster`, an experimental converter from GTUltra/GoatTracker `.sng` files to Hermit's 1raster tracker formats.
 - Added binary 1raster export for `.orm` and `.orb`, selectable with `--format orm|orb|both`.
 - Added Kick Assembler `.asm` export from `gtultra2raster`, with selectable player+data and data-only output via `--asm`, `--asm-mode`, `--asm-data`, and `--asm-format`.
@@ -28,6 +31,10 @@ and this project follows the existing GTUltra/GoatTracker versioning scheme.
 
 ### Changed
 
+- Changed SDL event routing so optional secondary video-window events do not affect the main GTUltra editor window.
+- Changed GTUltra application makefile object ownership to use one shared app object list for normal and Windows custom targets.
+- Changed Windows build scripts to copy the vendored FFmpeg runtime DLL set into `build/windows` when `GTULTRA_VIDEO=1`.
+- Changed macOS builds to remove stale object files before compiling to avoid mixing object files from other platforms.
 - Updated `README.md` with macOS, Windows, MSYS2, and 1raster converter build/use instructions.
 - Changed local build outputs to use `build/macos` and `build/windows` so development builds do not overwrite tracked release binaries.
 - Changed common make rules to allow configurable `DATAFILE`, `DAT2INC`, `STRIP`, and `STRIP_FAIL_OK` tools.
