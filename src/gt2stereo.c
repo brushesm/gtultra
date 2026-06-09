@@ -5421,9 +5421,9 @@ void handleLoadVideo(GTOBJECT* gt)
 	if (fileselector(videofilename, songpath, videofilter, "LOAD MP4 VIDEO", 0, gt, CEDIT, 0))
 	{
 		if (gt_video_load(videofilename))
-			snprintf(infoTextBuffer, sizeof infoTextBuffer, "Video Loaded:%s", videofilename);
+			snprintf(infoTextBuffer, sizeof infoTextBuffer, "Video Loaded:%.*s", (int)(sizeof infoTextBuffer - sizeof("Video Loaded:")), videofilename);
 		else
-			snprintf(infoTextBuffer, sizeof infoTextBuffer, "Video Load Failed:%s", videofilename);
+			snprintf(infoTextBuffer, sizeof infoTextBuffer, "Video Load Failed:%.*s", (int)(sizeof infoTextBuffer - sizeof("Video Load Failed:")), videofilename);
 		forceInfoLine = 1;
 	}
 

@@ -82,6 +82,8 @@ The video-enabled build still needs the MSYS2 FFmpeg development package for hea
 
 The vendored `win32/*.dll` files are runtime DLLs only. They do not replace the FFmpeg development headers, import libraries, or `pkg-config` metadata needed to compile a `GTULTRA_VIDEO=1` build.
 
+Video-enabled Windows builds intentionally do not use the full `-static` linker flag. FFmpeg is linked through the MSYS2 import libraries and shipped with the DLLs listed below. This avoids pulling in FFmpeg's large static dependency graph, which can produce missing `-ldl`/`-lshaderc_shared` errors or Rust duplicate-symbol failures from optional codec libraries.
+
 For a distributable Windows video build, include these files from `build/windows` together:
 
 - `gtultra.exe`

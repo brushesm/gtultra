@@ -60,9 +60,12 @@ echo Building GTUltra Windows binaries...
 pushd "%SRC_DIR%" || exit /b 1
 if not "%SDL2_PREFIX%"=="" (
     set "SDL_LIBS=-L%SDL2_PREFIX%\lib -lmingw32 -mwindows -lSDL2main -lSDL2 -lwinmm -lsetupapi -lole32 -loleaut32 -limm32 -lversion -lcfgmgr32 -static-libstdc++ -static-libgcc -static"
+    if "%GTULTRA_VIDEO%"=="1" set "SDL_LIBS=-L%SDL2_PREFIX%\lib -lmingw32 -mwindows -lSDL2main -lSDL2 -lwinmm -lsetupapi -lole32 -loleaut32 -limm32 -lversion -lcfgmgr32 -static-libstdc++ -static-libgcc"
     "%MAKE_CMD%" -f makefile.win PREFIX=../build/windows/ DATAFILE=./bme/datafile.exe DAT2INC=./bme/dat2inc.exe GTULTRA_VIDEO=%GTULTRA_VIDEO% "CFLAGS=-std=gnu17 -Ibme -Iasm -O3 -Wall" "LIBS=%SDL_LIBS%"
 ) else (
-    "%MAKE_CMD%" -f makefile.win PREFIX=../build/windows/ DATAFILE=./bme/datafile.exe DAT2INC=./bme/dat2inc.exe GTULTRA_VIDEO=%GTULTRA_VIDEO% "CFLAGS=-std=gnu17 -Ibme -Iasm -O3 -Wall" "LIBS=-lmingw32 -mwindows -lSDL2main -lSDL2 -lwinmm -lsetupapi -lole32 -loleaut32 -limm32 -lversion -lcfgmgr32 -static-libstdc++ -static-libgcc -static"
+    set "SDL_LIBS=-lmingw32 -mwindows -lSDL2main -lSDL2 -lwinmm -lsetupapi -lole32 -loleaut32 -limm32 -lversion -lcfgmgr32 -static-libstdc++ -static-libgcc -static"
+    if "%GTULTRA_VIDEO%"=="1" set "SDL_LIBS=-lmingw32 -mwindows -lSDL2main -lSDL2 -lwinmm -lsetupapi -lole32 -loleaut32 -limm32 -lversion -lcfgmgr32 -static-libstdc++ -static-libgcc"
+    "%MAKE_CMD%" -f makefile.win PREFIX=../build/windows/ DATAFILE=./bme/datafile.exe DAT2INC=./bme/dat2inc.exe GTULTRA_VIDEO=%GTULTRA_VIDEO% "CFLAGS=-std=gnu17 -Ibme -Iasm -O3 -Wall" "LIBS=%SDL_LIBS%"
 )
 if errorlevel 1 exit /b 1
 popd

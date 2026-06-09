@@ -9,10 +9,11 @@ DAT2INC?=./bme/dat2inc
 STRIP?=strip
 STRIP_FAIL_OK?=
 VIDEO_PKGS=libavformat libavcodec libavutil libswscale
+VIDEO_PKG_CONFIG_LIBS?=--libs
 
 ifeq ($(GTULTRA_VIDEO),1)
 VIDEO_CFLAGS:=$(shell pkg-config --cflags $(VIDEO_PKGS))
-VIDEO_LIBS:=$(shell pkg-config --libs $(VIDEO_PKGS))
+VIDEO_LIBS:=$(shell pkg-config $(VIDEO_PKG_CONFIG_LIBS) $(VIDEO_PKGS))
 override CFLAGS+=-DGTULTRA_VIDEO $(VIDEO_CFLAGS)
 override CXXFLAGS+=-DGTULTRA_VIDEO $(VIDEO_CFLAGS)
 override LIBS+=$(VIDEO_LIBS)

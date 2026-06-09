@@ -201,6 +201,12 @@ libs='-lmingw32 -mwindows -lSDL2main -lSDL2 -lwinmm -lsetupapi -lole32 -loleaut3
 if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists sdl2; then
     libs="$(pkg-config --static --libs sdl2) -lwinmm -lsetupapi -lole32 -loleaut32 -limm32 -lversion -lcfgmgr32 -static-libstdc++ -static-libgcc -static"
 fi
+if [[ "${GTULTRA_VIDEO:-0}" == "1" ]]; then
+    libs=" $libs "
+    libs="${libs// -static / }"
+    libs="${libs# }"
+    libs="${libs% }"
+fi
 
 echo "Building GTUltra Windows binaries..."
 (

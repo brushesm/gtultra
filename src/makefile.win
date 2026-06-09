@@ -13,6 +13,10 @@ STRIP_FAIL_OK=-
 
 include makefile.common
 
+ifeq ($(GTULTRA_VIDEO),1)
+override LIBS := $(filter-out -static,$(LIBS))
+endif
+
 $(PREFIX)gtultra$(SUFFIX): $(GTULTRA_APP_OBJS)
 	windres gt2stereo.rc goaticon.o
 	$(CXX) -o $@ $^ goaticon.o $(LIBS)
