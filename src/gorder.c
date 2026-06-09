@@ -309,18 +309,18 @@ void orderlistcommands(GTOBJECT *gt)
 		{
 			for (c = 0; c < editorInfo.maxSIDChannels; c++)
 			{
-				int c2 = getActualChannel(editorInfo.esnum, c);	// 0-12
-				int songNum = getActualSongNumber(editorInfo.esnum, c2);
-				int c3 = c2 % 6;
+				int c2 = getVisualChannelActualChannel(c);	// 0-11
+				int songNum = getVisualChannelSongNumber(c);
+				int songCh = getVisualChannelLocalChannel(c);
 
 				if (editorInfo.expandOrderListView == 0)
 				{
-					if (editorInfo.eseditpos < songlen[songNum][c3])
+					if (editorInfo.eseditpos < songlen[songNum][songCh])
 						gt->editorUndoInfo.editorInfo[c2].espos = editorInfo.eseditpos;
 				}
 				else
 				{
-					if (editorInfo.eseditpos < songOrderLength[songNum][c3])
+					if (editorInfo.eseditpos < songOrderLength[songNum][songCh])
 						gt->editorUndoInfo.editorInfo[c2].espos = editorInfo.eseditpos;
 				}
 				if (gt->editorUndoInfo.editorInfo[c2].esend < gt->editorUndoInfo.editorInfo[c2].espos)
@@ -358,18 +358,18 @@ void orderlistcommands(GTOBJECT *gt)
 			{
 				for (c = 0; c < editorInfo.maxSIDChannels; c++)
 				{
-					int c3 = c % 6;
-					int playingSong = getActualSongNumber(editorInfo.esnum, c);	// JP added this.
-					c2 = getActualChannel(editorInfo.esnum, c);	// 0-12
+					c2 = getVisualChannelActualChannel(c);	// 0-11
+					int playingSong = getVisualChannelSongNumber(c);
+					int songCh = getVisualChannelLocalChannel(c);
 
 					if (editorInfo.expandOrderListView == 0)
 					{
-						if (editorInfo.eseditpos < songlen[playingSong][c3])
+						if (editorInfo.eseditpos < songlen[playingSong][songCh])
 							gt->editorUndoInfo.editorInfo[c2].esend = editorInfo.eseditpos;
 					}
 					else
 					{
-						if (editorInfo.eseditpos < songOrderLength[playingSong][c3])
+						if (editorInfo.eseditpos < songOrderLength[playingSong][songCh])
 							gt->editorUndoInfo.editorInfo[c2].esend = editorInfo.eseditpos;
 					}
 				}
@@ -934,19 +934,20 @@ void songchange(GTOBJECT *gt, int resetEditingPositions)
 
 	for (c = 0; c < editorInfo.maxSIDChannels; c++)
 	{
-		int c2 = getActualChannel(editorInfo.esnum, c);	// 0-12
-		int songNum = getActualSongNumber(editorInfo.esnum, c2);
+		int c2 = getVisualChannelActualChannel(c);	// 0-11
+		int songNum = getVisualChannelSongNumber(c);
+		int songCh = getVisualChannelLocalChannel(c);
 
-		if (gt->editorUndoInfo.editorInfo[c2].espos >= songlen[songNum][c2 % 6] + 1)
+		if (gt->editorUndoInfo.editorInfo[c2].espos >= songlen[songNum][songCh] + 1)
 		{
-			gt->editorUndoInfo.editorInfo[c2].espos = songlen[songNum][c2 % 6] - 1;	//0;	//
+			gt->editorUndoInfo.editorInfo[c2].espos = songlen[songNum][songCh] - 1;	//0;	//
 			if (gt->editorUndoInfo.editorInfo[c2].espos < 0)
 				gt->editorUndoInfo.editorInfo[c2].espos = 0;
 		}
 
-		if (c2 == jc2 && editorInfo.eseditpos > songlen[songNum][c2 % 6] + 1)	// +1 as we have the RPT text 
+		if (c2 == jc2 && editorInfo.eseditpos > songlen[songNum][songCh] + 1)	// +1 as we have the RPT text
 		{
-			editorInfo.eseditpos = songlen[songNum][c2 % 6] - 1;	//0;
+			editorInfo.eseditpos = songlen[songNum][songCh] - 1;	//0;
 			if (editorInfo.eseditpos < 0)
 				editorInfo.eseditpos = 0;
 		}
@@ -1022,17 +1023,17 @@ void updateviewtopos(GTOBJECT *gt)
 
 	for (c = 0; c < editorInfo.maxSIDChannels; c++)
 	{
-		int c2 = getActualChannel(editorInfo.esnum, c);	// 0-12
-		int songNum = getActualSongNumber(editorInfo.esnum, c2);
-		int c3 = c % 6;
+		int c2 = getVisualChannelActualChannel(c);	// 0-11
+		int songNum = getVisualChannelSongNumber(c);
+		int songCh = getVisualChannelLocalChannel(c);
 
 		if (editorInfo.expandOrderListView == 0)
 		{
-			for (d = gt->editorUndoInfo.editorInfo[c2].espos; d < songlen[songNum][c3]; d++)
+			for (d = gt->editorUndoInfo.editorInfo[c2].espos; d < songlen[songNum][songCh]; d++)
 			{
-				if (songorder[songNum][c3][d] < MAX_PATT)
+				if (songorder[songNum][songCh][d] < MAX_PATT)
 				{
-					gt->editorUndoInfo.editorInfo[c2].epnum = songorder[songNum][c3][d];
+					gt->editorUndoInfo.editorInfo[c2].epnum = songorder[songNum][songCh][d];
 					break;
 				}
 				else
@@ -1041,18 +1042,18 @@ void updateviewtopos(GTOBJECT *gt)
 						gt->editorUndoInfo.editorInfo[c2].epnum = 0;
 				}
 			}
-			if (songlen[songNum][c3] == 0)
+			if (songlen[songNum][songCh] == 0)
 			{
 				gt->editorUndoInfo.editorInfo[c2].epnum = 0;
 			}
 		}
 		else
 		{
-			for (d = gt->editorUndoInfo.editorInfo[c2].espos; d < songOrderLength[songNum][c3]; d++)
+			for (d = gt->editorUndoInfo.editorInfo[c2].espos; d < songOrderLength[songNum][songCh]; d++)
 			{
-				if (songOrderPatterns[songNum][c3][d] < MAX_PATT)
+				if (songOrderPatterns[songNum][songCh][d] < MAX_PATT)
 				{
-					gt->editorUndoInfo.editorInfo[c2].epnum = songOrderPatterns[songNum][c3][d];
+					gt->editorUndoInfo.editorInfo[c2].epnum = songOrderPatterns[songNum][songCh][d];
 					break;
 				}
 				else
@@ -1061,7 +1062,7 @@ void updateviewtopos(GTOBJECT *gt)
 						gt->editorUndoInfo.editorInfo[c2].epnum = 0;
 				}
 			}
-			if (songOrderLength[songNum][c3] == 0)
+			if (songOrderLength[songNum][songCh] == 0)
 			{
 				gt->editorUndoInfo.editorInfo[c2].epnum = 0;
 			}

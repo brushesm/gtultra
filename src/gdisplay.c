@@ -2018,8 +2018,9 @@ void updateDisplayWhenFollowingAndPlaying_Compressed(GTOBJECT *gt)
 	{
 		for (int c = 0; c < editorInfo.maxSIDChannels; c++)
 		{
-			int c2 = getActualChannel(editorInfo.esnum, c);	// 0-12
-			int playingSong = getActualSongNumber(editorInfo.esnum, c2);	// JP added this. Only highlight playing row if showing the right song
+			int c2 = getVisualChannelActualChannel(c);	// 0-11
+			int playingSong = getVisualChannelSongNumber(c);
+			int songCh = getVisualChannelLocalChannel(c);
 
 			int newpos = gt->chn[c2].lastpattptr / 4;	//.pattptr / 4;
 			if (gt->chn[c2].advance)
@@ -2046,8 +2047,8 @@ void updateDisplayWhenFollowingAndPlaying_Compressed(GTOBJECT *gt)
 			newpos--;
 			if (newpos < 0)
 				newpos = 0;
-			if (newpos > songlen[playingSong][c2 % 6])	// 1.1.7 FIX (added %6) 3/5/2022
-				newpos = songlen[playingSong][c2 % 6];	// 1.1.7 FIX (added %6) 3/5/2022
+			if (newpos > songlen[playingSong][songCh])
+				newpos = songlen[playingSong][songCh];
 
 
 			gt->editorUndoInfo.editorInfo[c2].espos = gt->chn[c2].songptr - 1;
@@ -2081,8 +2082,9 @@ void updateDisplayWhenFollowingAndPlaying_Expanded(GTOBJECT *gt)
 	{
 		for (int c = 0; c < editorInfo.maxSIDChannels; c++)
 		{
-			int c2 = getActualChannel(editorInfo.esnum, c);	// 0-12
-			int playingSong = getActualSongNumber(editorInfo.esnum, c2);	// JP added this. Only highlight playing row if showing the right song
+			int c2 = getVisualChannelActualChannel(c);	// 0-11
+			int playingSong = getVisualChannelSongNumber(c);
+			int songCh = getVisualChannelLocalChannel(c);
 
 			int newpos = gt->chn[c2].lastpattptr / 4;	//stpattptr / pattptr / 4;
 			if (gt->chn[c2].advance)
@@ -2109,8 +2111,8 @@ void updateDisplayWhenFollowingAndPlaying_Expanded(GTOBJECT *gt)
 			newpos--;
 			if (newpos < 0)
 				newpos = 0;
-			if (newpos > songOrderLength[playingSong][c2 % 6])	// 1.1.7 FIX (added %6) 3/5/2022
-				newpos = songOrderLength[playingSong][c2 % 6];	// 1.1.7 FIX (added %6) 3/5/2022
+			if (newpos > songOrderLength[playingSong][songCh])
+				newpos = songOrderLength[playingSong][songCh];
 
 
 

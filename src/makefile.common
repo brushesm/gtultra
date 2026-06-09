@@ -13,9 +13,9 @@ VIDEO_PKGS=libavformat libavcodec libavutil libswscale
 ifeq ($(GTULTRA_VIDEO),1)
 VIDEO_CFLAGS:=$(shell pkg-config --cflags $(VIDEO_PKGS))
 VIDEO_LIBS:=$(shell pkg-config --libs $(VIDEO_PKGS))
-CFLAGS+=-DGTULTRA_VIDEO $(VIDEO_CFLAGS)
-CXXFLAGS+=-DGTULTRA_VIDEO $(VIDEO_CFLAGS)
-LIBS+=$(VIDEO_LIBS)
+override CFLAGS+=-DGTULTRA_VIDEO $(VIDEO_CFLAGS)
+override CXXFLAGS+=-DGTULTRA_VIDEO $(VIDEO_CFLAGS)
+override LIBS+=$(VIDEO_LIBS)
 GTULTRA_VIDEO_OBJS=gvideo.o
 endif
 

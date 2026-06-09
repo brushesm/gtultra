@@ -1729,11 +1729,13 @@ void handleShiftSpace(GTOBJECT *gt, int playChannel, int startPatternPos, int fo
 
 		for (int c = 0; c < editorInfo.maxSIDChannels; c++)
 		{
-			int c2 = getActualChannel(editorInfo.esnum, c);	// 0-12
+			int c2 = getVisualChannelActualChannel(c);	// 0-11
+			int songNum = getVisualChannelSongNumber(c);
+			int songCh = getVisualChannelLocalChannel(c);
 			int pat = gt->editorUndoInfo.editorInfo[c2].epnum;	// pattern number displayed along the top of the pattern
 			if (editorInfo.expandOrderListView == 0)
 			{
-				if (pat != songorder[editorInfo.esnum][c2 % 6][gt->editorUndoInfo.editorInfo[c2].espos])
+				if (pat != songorder[songNum][songCh][gt->editorUndoInfo.editorInfo[c2].espos])
 				{
 					initsongpos(editorInfo.esnum, PLAY_PATTERN, editorInfo.eppos, gt);
 					followplay = follow;
@@ -1742,7 +1744,7 @@ void handleShiftSpace(GTOBJECT *gt, int playChannel, int startPatternPos, int fo
 			}
 			else
 			{
-				if (pat != songOrderPatterns[editorInfo.esnum][c2 % 6][gt->editorUndoInfo.editorInfo[c2].espos])
+				if (pat != songOrderPatterns[songNum][songCh][gt->editorUndoInfo.editorInfo[c2].espos])
 				{
 					initsongpos(editorInfo.esnum, PLAY_PATTERN, editorInfo.eppos, gt);
 					followplay = follow;
@@ -2318,4 +2320,3 @@ void clearKeyOns(GTOBJECT *gt, int c2, int i2)
 		};
 	}
 }
-

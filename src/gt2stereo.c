@@ -4040,7 +4040,7 @@ void backupPatternDisplayInfo(GTOBJECT* gt)
 
 	for (int c = 0; c < editorInfo.maxSIDChannels; c++)	// V1.2.2
 	{
-		int c2 = getActualChannel(editorInfo.esnum, c);	// 0-12
+		int c2 = getVisualChannelActualChannel(c);	// 0-11
 		backupPatternPos[c] = gt->chn[c2].pattptr;
 	}
 }
@@ -4052,10 +4052,10 @@ void restorePatternDisplayInfo(GTOBJECT* gt)
 
 	for (int c = 0; c < editorInfo.maxSIDChannels; c++)	//V1.2.2 restore pattern play position when selecting another pattern in orderlist
 	{
-		int c2 = getActualChannel(editorInfo.esnum, c);	// 0-12
+		int c2 = getVisualChannelActualChannel(c);	// 0-11
 		gt->chn[c2].pattptr = backupPatternPos[c];
 		// check if cursor > patlen. And reset to 0 if it is
-		if ((c2 % 6) == editorInfo.epchn)
+		if (c == getEditorVisualPatternChannel())
 		{
 			if (editorInfo.eppos > pattlen[gt->editorUndoInfo.editorInfo[c2].epnum])
 			{
