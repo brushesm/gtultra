@@ -24,11 +24,29 @@
 #endif
 
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <dirent.h>
 #include <time.h>
 
 #include "goattrk2.h"
 #include "bme.h"
+
+static void showStartupError(const char* message)
+{
+#ifdef __WIN32__
+	MessageBoxA(NULL, message, "GTUltra startup error", MB_OK | MB_ICONERROR);
+#else
+	fprintf(stderr, "%s\n", message);
+#endif
+}
+
+static int isDebugEnvEnabled(const char* name)
+{
+	const char* value = getenv(name);
+
+	return value && value[0] != '\0' && strcmp(value, "0");
+}
 
 int songExportSuccessFlag = 0;
 int sidAddr1 = 0xd400;
@@ -196,6 +214,79 @@ unsigned short tableBackgroundColors[MAX_TABLES][MAX_TABLELEN];
 unsigned char paletteR[256];
 unsigned char paletteG[256];
 unsigned char paletteB[256];
+int debugPalette = 0;
+int debugPattern = 0;
+
+static int paletteRGBIndex(int uiColor)
+{
+	return uiColor - FIRST_UI_COLOR;
+}
+
+static int paletteEntriesMatch(int palettePreset, int color1, int color2)
+{
+	int index1 = paletteRGBIndex(color1);
+	int index2 = paletteRGBIndex(color2);
+
+	if (palettePreset < 0 || palettePreset >= MAX_PALETTE_PRESETS)
+		return 1;
+	if (index1 < 0 || index1 >= MAX_PALETTE_ENTRIES)
+		return 1;
+	if (index2 < 0 || index2 >= MAX_PALETTE_ENTRIES)
+		return 1;
+
+	return paletteRGB[palettePreset][0][index1] == paletteRGB[palettePreset][0][index2] &&
+		paletteRGB[palettePreset][1][index1] == paletteRGB[palettePreset][1][index2] &&
+		paletteRGB[palettePreset][2][index1] == paletteRGB[palettePreset][2][index2];
+}
+
+static int isPatternNotePaletteReadable(int palettePreset)
+{
+	return !paletteEntriesMatch(palettePreset, CPATTERN_NOTE_FOREGROUND, CPATTERN_BACKGROUND1) &&
+		!paletteEntriesMatch(palettePreset, CPATTERN_NOTE_FOREGROUND, CPATTERN_BACKGROUND2) &&
+		!paletteEntriesMatch(palettePreset, CPATTERN_NOTE_FOREGROUND, CPATTERN_FIRST_BACKGROUND1) &&
+		!paletteEntriesMatch(palettePreset, CPATTERN_NOTE_FOREGROUND, CPATTERN_FIRST_BACKGROUND2);
+}
+
+static void debugPrintPaletteEntry(const char* label, int uiColor)
+{
+	int paletteIndex = paletteRGBIndex(uiColor);
+
+	if (!debugPalette)
+		return;
+	if (paletteIndex < 0 || paletteIndex >= MAX_PALETTE_ENTRIES)
+	{
+		fprintf(stdout, "[palette] %s color=%d out of palette range\n", label, uiColor);
+		return;
+	}
+
+	fprintf(stdout, "[palette] %s color=%d index=%02X rgb=%02X,%02X,%02X\n",
+		label,
+		uiColor,
+		paletteIndex,
+		paletteR[uiColor],
+		paletteG[uiColor],
+		paletteB[uiColor]);
+}
+
+static void debugPrintActivePalette(void)
+{
+	if (!debugPalette)
+		return;
+
+	fprintf(stdout, "[palette] active preset=%d name='%s'\n",
+		currentPalettePreset,
+		paletteNames[currentPalettePreset] ? paletteNames[currentPalettePreset] : "(null)");
+	debugPrintPaletteEntry("pattern background 1", CPATTERN_BACKGROUND1);
+	debugPrintPaletteEntry("pattern foreground 1", CPATTERN_FOREGROUND1);
+	debugPrintPaletteEntry("pattern background 2", CPATTERN_BACKGROUND2);
+	debugPrintPaletteEntry("pattern foreground 2", CPATTERN_FOREGROUND2);
+	debugPrintPaletteEntry("pattern note", CPATTERN_NOTE_FOREGROUND);
+	debugPrintPaletteEntry("pattern command", CPATTERN_COMMAND_FOREGROUND);
+	debugPrintPaletteEntry("pattern instrument", CPATTERN_INSTRUMENT_FOREGROUND);
+	debugPrintPaletteEntry("pattern highlight background", CPATTERN_HIGHLIGHT_BACKGROUND);
+	debugPrintPaletteEntry("pattern highlight foreground", CPATTERN_HIGHLIGHT_FOREGROUND);
+	fflush(stdout);
+}
 
 //int editorInfo.maxSIDChannels = 3;	//12;
 int gMIDINote = -1;
@@ -250,6 +341,14 @@ int main(int argc, char** argv)
 	int c, d;
 	int sidaddresssetfromcommandline = 0;
 
+	debugPalette = isDebugEnvEnabled("GTULTRA_DEBUG_PALETTE");
+	debugPattern = isDebugEnvEnabled("GTULTRA_DEBUG_PATTERN");
+	if (debugPalette || debugPattern)
+	{
+		fprintf(stdout, "[debug] GTULTRA_DEBUG_PALETTE=%d GTULTRA_DEBUG_PATTERN=%d\n", debugPalette, debugPattern);
+		fflush(stdout);
+	}
+
 	// JP: SDL2 produces no audio for Windows32 without explicitly setting this (otherwise, it's set to "dummy sound" as the output)
 #ifdef __WIN32__
 	SDL_setenv("SDL_AUDIODRIVER", "directsound", 1);
@@ -262,7 +361,11 @@ int main(int argc, char** argv)
 
 	programname += sizeof "$VER:";
 	// Open datafile
-	io_openlinkeddatafile(datafile);
+	if (!io_openlinkeddatafile(datafile))
+	{
+		showStartupError("Could not open the linked GTUltra datafile.");
+		return 1;
+	}
 
 	// Load configuration
 #ifdef __WIN32__
@@ -294,10 +397,15 @@ int main(int argc, char** argv)
 	for (int i = 0;i < maxPresetPalettes;i++)
 	{
 		sprintf(textbuffer, "%ddefault.gtp", i);
-		//	printf("palette:%s\n", textbuffer);
+		if (debugPalette)
+			fprintf(stdout, "[palette] bundled open name='%s'\n", textbuffer);
 		int handle = io_open(textbuffer);
 		if (handle == -1)
-			return 0;
+		{
+			snprintf(textbuffer, sizeof textbuffer, "Could not load startup palette %ddefault.gtp.", i);
+			showStartupError(textbuffer);
+			return 1;
+		}
 
 		int size = io_lseek(handle, 0, SEEK_END);
 		io_lseek(handle, 0, SEEK_SET);
@@ -305,24 +413,38 @@ int main(int argc, char** argv)
 		io_read(handle, paletteMem, size);
 		io_close(handle);
 		paletteMem[size] = 0;	// end marker
+		if (debugPalette)
+			fprintf(stdout, "[palette] bundled read name='%ddefault.gtp' bytes=%d startSlot=%d\n", i, size, currentLoadedPresetIndex);
 
 
 		if (i == 0)
 		{
 			for (int j = 0;j < 16;j++)
 			{
-				readPaletteData(paletteMem, textbuffer);
+				int slot = currentLoadedPresetIndex;
+				int loaded = readPaletteData(paletteMem, textbuffer);
+				if (debugPalette)
+					fprintf(stdout, "[palette] seed default slot=%d loaded=%d nextSlot=%d name='%s'\n", slot, loaded, currentLoadedPresetIndex, textbuffer);
 			}
 			currentLoadedPresetIndex = 1;
+			if (debugPalette)
+				fprintf(stdout, "[palette] reset next bundled slot to %d after default seeding\n", currentLoadedPresetIndex);
 		}
 		else
-			readPaletteData(paletteMem, textbuffer);
+		{
+			int slot = currentLoadedPresetIndex;
+			int loaded = readPaletteData(paletteMem, textbuffer);
+			if (debugPalette)
+				fprintf(stdout, "[palette] bundled load slot=%d loaded=%d nextSlot=%d name='%s'\n", slot, loaded, currentLoadedPresetIndex, textbuffer);
+		}
 
 		free(paletteMem);
 	}
 
 	// Now load palettes from the gtpalettes folder to fill all 16 slots
 	loadPalettes();
+	if (debugPalette)
+		fflush(stdout);
 
 	configfile = fopen(appFileName, "rt");
 	if (configfile)
@@ -656,11 +778,27 @@ int main(int argc, char** argv)
 	currentPalettePreset = 0;
 	for (int i = 0;i < MAX_PALETTE_PRESETS;i++)
 	{
-		if (!strcmp(startPaletteName, paletteNames[i]))
+		if (paletteNames[i] && !strcmp(startPaletteName, paletteNames[i]))
 		{
 			currentPalettePreset = i;
 			break;
 		}
+	}
+	if (debugPalette)
+	{
+		fprintf(stdout, "[palette] config startPaletteName='%s' selectedPreset=%d selectedName='%s'\n",
+			startPaletteName,
+			currentPalettePreset,
+			paletteNames[currentPalettePreset] ? paletteNames[currentPalettePreset] : "(null)");
+	}
+
+	if (!isPatternNotePaletteReadable(currentPalettePreset))
+	{
+		if (debugPalette)
+			fprintf(stdout, "[palette] selected preset %d note foreground is not readable against pattern backgrounds; falling back to preset 0\n", currentPalettePreset);
+		currentPalettePreset = 0;
+		if (isPatternNotePaletteReadable(currentPalettePreset))
+			snprintf(infoTextBuffer, sizeof infoTextBuffer, "Startup palette was unreadable; using default palette");
 	}
 
 	//	if (currentPalettePreset >= MAX_PALETTE_PRESETS)
@@ -718,12 +856,17 @@ int main(int argc, char** argv)
 
 	// Set screenmode
 	if (!initscreen())
+	{
+		snprintf(textbuffer, sizeof textbuffer, "Could not initialize the GTUltra screen: %s", SDL_GetError());
+		showStartupError(textbuffer);
 		return 1;
+	}
 
 
 	waveformDisplayInfo.displayOnOff = 0;
 
 	initPaletteDisplay();
+	debugPrintActivePalette();
 	setTableBackgroundColours(0);
 
 	initPolyKeyboard();

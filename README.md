@@ -78,7 +78,7 @@ set GTULTRA_VIDEO=1
 build-windows.bat
 ```
 
-The video-enabled build still needs the MSYS2 FFmpeg development package for headers, import libraries, and `pkg-config`. The repository also carries the matching runtime DLL set in `win32/`, derived from the MSYS2 UCRT64 `mingw-w64-ucrt-x86_64-ffmpeg` package. When `GTULTRA_VIDEO=1`, both Windows build scripts copy every DLL listed in `win32/ffmpeg-runtime-dlls.txt` from `win32/` into `build/windows`.
+The video-enabled build still needs the MSYS2 FFmpeg development package for headers, import libraries, and `pkg-config`. The repository also carries a baseline runtime DLL set in `win32/`, derived from the MSYS2 UCRT64 `mingw-w64-ucrt-x86_64-ffmpeg` package. When `GTULTRA_VIDEO=1`, the MSYS2 build script copies the listed runtime DLLs and then discovers the actual DLL dependency closure from the built executables, so `build/windows` matches the installed MSYS2 package versions.
 
 The vendored `win32/*.dll` files are runtime DLLs only. They do not replace the FFmpeg development headers, import libraries, or `pkg-config` metadata needed to compile a `GTULTRA_VIDEO=1` build.
 
@@ -91,7 +91,7 @@ For a distributable Windows video build, include these files from `build/windows
 - `SDL2.dll`
 - every FFmpeg/runtime DLL copied from `win32/ffmpeg-runtime-dlls.txt`
 
-If you intentionally refresh FFmpeg to a different MSYS2 package version, replace the DLLs in `win32/`, update `win32/ffmpeg-runtime-dlls.txt`, and rebuild. `FFMPEG_PREFIX` is only a fallback for missing vendored DLLs or for a deliberate refresh, for example `set FFMPEG_PREFIX=C:\msys64\ucrt64`.
+If you intentionally refresh FFmpeg to a different MSYS2 package version, replace the DLLs in `win32/`, update `win32/ffmpeg-runtime-dlls.txt`, and rebuild. `FFMPEG_PREFIX` is only a fallback for missing vendored DLLs or for a deliberate refresh, for example `set FFMPEG_PREFIX=C:\msys64\ucrt64`. If a video-enabled Windows build succeeds but `gtultra.exe` does not start, rebuild with `GTULTRA_VIDEO=1 ./build-windows-msys2.sh` so the runtime DLL closure is regenerated in `build/windows`.
 
 ## Optional MP4 Video Sync
 

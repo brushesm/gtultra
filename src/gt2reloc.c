@@ -131,6 +131,8 @@ unsigned short tableBackgroundColors[MAX_TABLES][MAX_TABLELEN];
 unsigned char paletteR[256];
 unsigned char paletteG[256];
 unsigned char paletteB[256];
+int debugPalette = 0;
+int debugPattern = 0;
 extern unsigned char datafile[];
 int debugTicks;	// used to measure CPU use when looking to improve performance
 char appFileName[MAX_PATHNAME];

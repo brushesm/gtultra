@@ -225,13 +225,16 @@ void win_checkmessages(void)
 
 		case SDL_WINDOWEVENT:
 
-			if (win_window && event.window.windowID == SDL_GetWindowID(win_window) && event.window.event == SDL_WINDOWEVENT_RESIZED) {
-				float xsize = (float)event.window.data2*xscale;
-				SDL_SetWindowSize(win_window, xsize, event.window.data2);
-				gfx_resize(xsize, event.window.data2);
-
-				xmouseScale = originalWidth / xsize;
-				ymouseScale = originalHeight / (float)event.window.data2;
+			if (win_window &&
+				event.window.windowID == SDL_GetWindowID(win_window) &&
+				(event.window.event == SDL_WINDOWEVENT_RESIZED ||
+					event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED)) {
+				if (event.window.data1 > 0 && event.window.data2 > 0)
+				{
+					xmouseScale = originalWidth / (float)event.window.data1;
+					ymouseScale = originalHeight / (float)event.window.data2;
+					gfx_redraw = 1;
+				}
 			}
 			break;
 

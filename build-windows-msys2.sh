@@ -105,6 +105,60 @@ require_tool() {
     fi
 }
 
+copy_runtime_dll_by_name() {
+    local dll="$1"
+    local prefix
+
+    [[ -n "$dll" ]] || return 1
+
+    for prefix in "${MINGW_PREFIX:-}" /ucrt64 /mingw64 /clang64 /clangarm64 /mingw32; do
+        [[ -n "$prefix" ]] || continue
+        if [[ -f "$prefix/bin/$dll" ]]; then
+            cp -f "$prefix/bin/$dll" "$out_dir/$dll"
+            return 0
+        fi
+    done
+
+    if [[ -f "$root_dir/win32/$dll" ]]; then
+        cp -f "$root_dir/win32/$dll" "$out_dir/$dll"
+        return 0
+    fi
+
+    return 1
+}
+
+copy_discovered_runtime_dependencies() {
+    local -a queue=("$@")
+    local -A scanned=()
+    local file
+    local dll
+    local copied_path
+
+    if ! command -v objdump >/dev/null 2>&1; then
+        echo "warning: objdump was not found. Runtime DLL dependency discovery was skipped." >&2
+        return
+    fi
+
+    while ((${#queue[@]})); do
+        file="${queue[0]}"
+        queue=("${queue[@]:1}")
+
+        [[ -f "$file" ]] || continue
+        [[ -z "${scanned[$file]:-}" ]] || continue
+        scanned[$file]=1
+
+        while IFS= read -r dll; do
+            [[ -n "$dll" ]] || continue
+            if copy_runtime_dll_by_name "$dll"; then
+                copied_path="$out_dir/$dll"
+                if [[ -f "$copied_path" && -z "${scanned[$copied_path]:-}" ]]; then
+                    queue+=("$copied_path")
+                fi
+            fi
+        done < <(objdump -p "$file" 2>/dev/null | sed -n 's/^[[:space:]]*DLL Name: //p')
+    done
+}
+
 copy_runtime_files() {
     if [[ -f "$root_dir/win32/SDL2.dll" ]]; then
         cp -f "$root_dir/win32/SDL2.dll" "$out_dir/SDL2.dll"
@@ -134,31 +188,24 @@ copy_runtime_files() {
 		local dll_list="$root_dir/win32/ffmpeg-runtime-dlls.txt"
 		local prefix
 
-		if [[ ! -f "$dll_list" ]]; then
-			echo "warning: $dll_list was not found. Copy FFmpeg DLLs beside gtultra.exe before running." >&2
-			return
+		if [[ -f "$dll_list" ]]; then
+			while IFS= read -r dll; do
+				[[ -n "$dll" ]] || continue
+				copied=0
+				if copy_runtime_dll_by_name "$dll"; then
+					copied=1
+				fi
+				if [[ "$copied" == "0" ]]; then
+					echo "warning: FFmpeg runtime DLL $dll was not found." >&2
+				fi
+			done < "$dll_list"
+		else
+			echo "warning: $dll_list was not found. Discovering FFmpeg DLLs from built executables only." >&2
 		fi
 
-		while IFS= read -r dll; do
-			[[ -n "$dll" ]] || continue
-			if [[ -f "$root_dir/win32/$dll" ]]; then
-				cp -f "$root_dir/win32/$dll" "$out_dir/$dll"
-				continue
-			fi
-
-			copied=0
-			for prefix in "${MINGW_PREFIX:-}" /ucrt64 /mingw64 /clang64 /clangarm64 /mingw32; do
-				[[ -n "$prefix" ]] || continue
-				if [[ -f "$prefix/bin/$dll" ]]; then
-					cp -f "$prefix/bin/$dll" "$out_dir/$dll"
-					copied=1
-					break
-				fi
-			done
-			if [[ "$copied" == "0" ]]; then
-				echo "warning: FFmpeg runtime DLL $dll was not found." >&2
-			fi
-		done < "$dll_list"
+		copy_discovered_runtime_dependencies \
+			"$out_dir/gtultra.exe" \
+			"$out_dir/gt2reloc.exe"
 	fi
 }
 
@@ -168,6 +215,9 @@ require_tool gcc
 require_tool g++
 require_tool windres
 require_tool strip
+if [[ "${GTULTRA_VIDEO:-0}" == "1" ]]; then
+	require_tool objdump
+fi
 
 if [[ "${GTULTRA_VIDEO:-0}" == "1" ]]; then
     require_tool pkg-config

@@ -98,19 +98,28 @@ exit /b 0
 
 :copy_ffmpeg_runtime
 set "FFMPEG_RUNTIME_LIST=%ROOT%win32\ffmpeg-runtime-dlls.txt"
+if "%FFMPEG_PREFIX%"=="" (
+    for /F "delims=" %%P in ('pkg-config --variable=prefix libavformat 2^>nul') do set "FFMPEG_PREFIX=%%P"
+)
 if not exist "%FFMPEG_RUNTIME_LIST%" (
-    echo warning: %FFMPEG_RUNTIME_LIST% was not found. Copy FFmpeg DLLs beside gtultra.exe before running. 1>&2
-    exit /b 0
+    echo warning: %FFMPEG_RUNTIME_LIST% was not found. Falling back to FFmpeg prefix runtime DLLs. 1>&2
+    goto copy_ffmpeg_prefix_dlls
 )
 for /F "usebackq delims=" %%D in ("%FFMPEG_RUNTIME_LIST%") do (
-    if exist "%ROOT%win32\%%D" (
-        copy /Y "%ROOT%win32\%%D" "%OUT_DIR%\%%D" >nul
-    )
-    if not exist "%OUT_DIR%\%%D" if not "%FFMPEG_PREFIX%"=="" if exist "%FFMPEG_PREFIX%\bin\%%D" (
+    if not "%FFMPEG_PREFIX%"=="" if exist "%FFMPEG_PREFIX%\bin\%%D" (
         copy /Y "%FFMPEG_PREFIX%\bin\%%D" "%OUT_DIR%\%%D" >nul
+    )
+    if not exist "%OUT_DIR%\%%D" if exist "%ROOT%win32\%%D" (
+        copy /Y "%ROOT%win32\%%D" "%OUT_DIR%\%%D" >nul
     )
     if not exist "%OUT_DIR%\%%D" (
         echo warning: FFmpeg runtime DLL %%D was not found. 1>&2
+    )
+)
+:copy_ffmpeg_prefix_dlls
+if not "%FFMPEG_PREFIX%"=="" if exist "%FFMPEG_PREFIX%\bin\*.dll" (
+    for %%D in ("%FFMPEG_PREFIX%\bin\*.dll") do (
+        copy /Y "%%~fD" "%OUT_DIR%\%%~nxD" >nul
     )
 )
 exit /b 0

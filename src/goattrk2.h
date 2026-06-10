@@ -168,6 +168,8 @@ extern short tableBackgroundColors[MAX_TABLES][MAX_TABLELEN];
 extern unsigned char paletteR[256];
 extern unsigned char paletteG[256];
 extern unsigned char paletteB[256];
+extern int debugPalette;
+extern int debugPattern;
 //extern int editorInfo.maxSIDChannels;
 extern char infoTextBuffer[256];
 

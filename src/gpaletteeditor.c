@@ -589,9 +589,14 @@ int loadPalette(char *palettePath,char *paletteFileName)
 	if (currentLoadedPresetIndex >= MAX_PALETTE_PRESETS)
 		return -1;	// Already loaded max number of preset palettes
 
+	if (debugPalette)
+		fprintf(stdout, "[palette] user load attempt slot=%d path='%s' name='%s'\n", currentLoadedPresetIndex, palettePath, paletteFileName);
+
 	FILE *handle = fopen(palettePath, "rb");	// Have to use RB instead of RT as the default file is within the binary wad..grrr
 	if (handle == NULL)
 	{
+		if (debugPalette)
+			fprintf(stdout, "[palette] user load failed path='%s'\n", palettePath);
 		jdebug[0] = 0xfe;
 		return 0;
 	}
@@ -607,7 +612,10 @@ int loadPalette(char *palettePath,char *paletteFileName)
 	paletteMem[size] = 0;	// end marker
 
 	// Read palette data from text buffer
+	int slot = currentLoadedPresetIndex;
 	int ret = readPaletteData(paletteMem,paletteFileName);
+	if (debugPalette)
+		fprintf(stdout, "[palette] user load result slot=%d loaded=%d nextSlot=%d name='%s' bytes=%d\n", slot, ret, currentLoadedPresetIndex, paletteFileName, size);
 	free(paletteMem);
 
 	return ret;
@@ -639,6 +647,9 @@ int readPaletteData(char *paletteMem, char *paletteName)
 
 	int lines = 0;
 	int foundPaletteInfo = 0;
+
+	if (currentLoadedPresetIndex < 0 || currentLoadedPresetIndex >= MAX_PALETTE_PRESETS)
+		return 0;
 
 	setPaletteName(paletteName, currentLoadedPresetIndex);
 
@@ -683,6 +694,9 @@ int readPaletteData(char *paletteMem, char *paletteName)
 				if (token == NULL)
 					break;
 				int blue = convertStringToHex(token);
+
+				if (paletteIndex < 0 || paletteIndex >= MAX_PALETTE_ENTRIES)
+					return 0;
 
 				paletteRGB[currentLoadedPresetIndex][0][paletteIndex] = red;
 				paletteRGB[currentLoadedPresetIndex][1][paletteIndex] = green;
@@ -785,10 +799,14 @@ int loadPalettes()
 	strcat(paletteFile, "/.goattrk/gtpalettes");
 #endif
 
+	if (debugPalette)
+		fprintf(stdout, "[palette] user folder='%s'\n", paletteFile);
 
 	folder = opendir(paletteFile);
 	if (folder == NULL)
 	{
+		if (debugPalette)
+			fprintf(stdout, "[palette] user folder missing; creating '%s'\n", paletteFile);
 #ifdef __WIN32__
 		mkdir(paletteFile);	// default palette folder didn't exist in config file location. It now does..
 #else
@@ -817,6 +835,8 @@ int loadPalettes()
 	}
 
 	closedir(folder);
+	if (debugPalette)
+		fflush(stdout);
 
 	return(0);
 }

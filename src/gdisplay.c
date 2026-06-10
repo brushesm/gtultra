@@ -34,6 +34,97 @@ char *notenameTableView[] =
 
 char timechar[] = { ':', ' ' };
 
+static int colorWithForeground(int color, int foreground)
+{
+	return (color & 0xff00) | (foreground & 0xff);
+}
+
+static int colorWithBackground(int color, int background)
+{
+	return (color & 0xff) | ((background & 0xff) << 8);
+}
+
+static int colorDistanceSquared(int color1, int color2)
+{
+	int dr = (int)paletteR[color1 & 0xff] - (int)paletteR[color2 & 0xff];
+	int dg = (int)paletteG[color1 & 0xff] - (int)paletteG[color2 & 0xff];
+	int db = (int)paletteB[color1 & 0xff] - (int)paletteB[color2 & 0xff];
+
+	return dr * dr + dg * dg + db * db;
+}
+
+static int readableForegroundForBackground(int foreground, int background)
+{
+	static const int fallbackColors[] = {
+		CPATTERN_NOTE_FOREGROUND,
+		CPATTERN_COMMAND_FOREGROUND,
+		CPATTERN_INSTRUMENT_FOREGROUND,
+		CPATTERN_HIGHLIGHT_FOREGROUND,
+		CPATTERN_INDEX_HIGHLIGHT,
+		CTITLES_FOREGROUND,
+		CINFO_FOREGROUND,
+		15,
+		0
+	};
+	enum { MIN_PATTERN_TEXT_DISTANCE = 48 * 48 };
+	int bestForeground = foreground & 0xff;
+	int bestDistance = colorDistanceSquared(bestForeground, background);
+
+	if (bestDistance >= MIN_PATTERN_TEXT_DISTANCE)
+		return bestForeground;
+
+	for (size_t i = 0; i < sizeof fallbackColors / sizeof fallbackColors[0]; i++)
+	{
+		int candidate = fallbackColors[i] & 0xff;
+		int distance = colorDistanceSquared(candidate, background);
+
+		if (distance > bestDistance)
+		{
+			bestForeground = candidate;
+			bestDistance = distance;
+		}
+	}
+
+	return bestForeground;
+}
+
+static int colorWithReadableForeground(int color, int foreground)
+{
+	int background = (color >> 8) & 0xff;
+	int readableForeground = readableForegroundForBackground(foreground, background);
+
+	return colorWithForeground(color, readableForeground);
+}
+
+static void debugPrintPatternRow(const char* renderer, int c, int c2, int p, int patternNumber, unsigned lastpattptr, int colorNoChange, int color2, int color3, int color4, int color5, const char* text)
+{
+	static int rowsPrinted = 0;
+
+	if (!debugPattern || rowsPrinted >= 48)
+		return;
+
+	fprintf(stdout,
+		"[pattern] %s c=%d actual=%d row=%d pat=%02X lastpattptr=%08X colorNoChange=%d note=%04X inst=%04X cmd=%04X data=%04X text='%.13s'\n",
+		renderer,
+		c,
+		c2,
+		p,
+		patternNumber & 0xff,
+		lastpattptr,
+		colorNoChange,
+		color2 & 0xffff,
+		color3 & 0xffff,
+		color4 & 0xffff,
+		color5 & 0xffff,
+		text);
+	rowsPrinted++;
+	if (rowsPrinted == 48)
+	{
+		fprintf(stdout, "[pattern] renderer debug limit reached\n");
+		fflush(stdout);
+	}
+}
+
 int UIUnderline = 0;
 
 int initForST64 = 0;
@@ -647,7 +738,7 @@ void displayPattern6Chn(GTOBJECT *gt)
 		//		if ((p% stepsize) == 0)
 		//			color |= CPATTERN_INDEX_HIGHLIGHT;
 		//		else
-		color |= CPATTERN_NOTE_FOREGROUND;
+		color = colorWithReadableForeground(color, CPATTERN_NOTE_FOREGROUND);
 
 		if ((p < 0) || (p > maxpattlen))
 		{
@@ -664,9 +755,9 @@ void displayPattern6Chn(GTOBJECT *gt)
 
 			color &= 0xff00;
 			if ((p% stepsize) == 0)
-				color |= CPATTERN_INDEX_HIGHLIGHT;
+				color = colorWithReadableForeground(color, CPATTERN_INDEX_HIGHLIGHT);
 			else
-				color |= CPATTERN_NOTE_FOREGROUND;
+				color = colorWithReadableForeground(color, CPATTERN_NOTE_FOREGROUND);
 
 			if (!(patterndispmode & 1))
 			{
@@ -827,12 +918,6 @@ void displayPattern6Chn(GTOBJECT *gt)
 				else if ((p% stepsize) == 0)
 					color = getColor(CPATTERN_FIRST_FOREGROUND1, CPATTERN_FIRST_BACKGROUND1);
 
-				if (gt->chn[c2].lastpattptr == 0x7fffffff)
-				{
-					// Not sure what this will do in this case, so let's see what the screen shows...
-					color = 2;
-					colorNoChange = 1;
-				}
 			}
 
 				if (isValidPatternNumber(gt->chn[c2].lastpattnum) && patternNumber == gt->chn[c2].lastpattnum && isplaying(gt))
@@ -855,49 +940,48 @@ void displayPattern6Chn(GTOBJECT *gt)
 			}
 
 
-				if ((p < 0) || (p > patternLen) || c2 >= editorInfo.maxSIDChannels || invalidColumn)
+			if ((p < 0) || (p > patternLen) || c2 >= editorInfo.maxSIDChannels || invalidColumn)
+			{
+				color = getColor(CUNUSED_MUTED_FOREGROUND, CUNUSED_MUTED_BACKGROUND);
+				colorNoChange = 1;
+				sprintf(textbuffer, "        ");
+			}
+			else
+			{
+				if (pattern[patternNumber][p * 4] == ENDPATT)
 				{
-					color = getColor(CUNUSED_MUTED_FOREGROUND, CUNUSED_MUTED_BACKGROUND);
-					colorNoChange = 1;
-					sprintf(textbuffer, "        ");
-				}
-				else
-				{
-					if (pattern[patternNumber][p * 4] == ENDPATT)
+					sprintf(textbuffer, "PATT.END");
+					if (colorNoChange == 0)
 					{
-						sprintf(textbuffer, "PATT.END");
-						if (colorNoChange == 0)
-						{
-							color &= 0xff00;	// keep background (stripes)
-						color |= CPATTERN_NOTE_FOREGROUND;
+						color &= 0xff00;	// keep background (stripes)
+						color = colorWithReadableForeground(color, CPATTERN_NOTE_FOREGROUND);
 						colorNoChange++;
 						//				notEmpty++;
 					}
-					}
-					else
+				}
+				else
+				{
+					sprintf(textbuffer, "%s%02X%01X%02X",
+						notename[pattern[patternNumber][p * 4] - FIRSTNOTE],
+						pattern[patternNumber][p * 4 + 1],
+						pattern[patternNumber][p * 4 + 2],
+						pattern[patternNumber][p * 4 + 3]);
+
+					if (patterndispmode & 2)
 					{
-
-						sprintf(textbuffer, "%s%02X%01X%02X",
-							notename[pattern[patternNumber][p * 4] - FIRSTNOTE],
-							pattern[patternNumber][p * 4 + 1],
-							pattern[patternNumber][p * 4 + 2],
-							pattern[patternNumber][p * 4 + 3]);
-
-						if (patterndispmode & 2)
-						{
-							if (!pattern[patternNumber][p * 4 + 1])
-								memset(&textbuffer[3], '.', 2);
-							if (!pattern[patternNumber][p * 4 + 2])
-								memset(&textbuffer[5], '.', 3);
-						}
+						if (!pattern[patternNumber][p * 4 + 1])
+							memset(&textbuffer[3], '.', 2);
+						if (!pattern[patternNumber][p * 4 + 2])
+							memset(&textbuffer[5], '.', 3);
 					}
 				}
+			}
 
 			int displayCursor = 0;
 			if (p == editorInfo.eppos && !invalidColumn)
 			{
 				displayCursor++;
-				color = (color & 0xff00) | CPATTERN_HIGHLIGHT_FOREGROUND;
+				color = colorWithReadableForeground(color, CPATTERN_HIGHLIGHT_FOREGROUND);
 			}
 
 			int color3 = color;
@@ -906,52 +990,43 @@ void displayPattern6Chn(GTOBJECT *gt)
 			int color5 = color;
 
 
-				if (colorNoChange == 0 && isValidPatternNumber(patternNumber))
-				{
-					int n = pattern[patternNumber][p * 4] - FIRSTNOTE;
+			if (colorNoChange == 0 && isValidPatternNumber(patternNumber))
+			{
+				int n = pattern[patternNumber][p * 4] - FIRSTNOTE;
 
-				int noteColor = color & 0xff00;	// keep background (stripes)
-				noteColor |= CPATTERN_NOTE_FOREGROUND;
-				int commandColor = color & 0xff00;	// keep background (stripes)
-				commandColor |= CPATTERN_COMMAND_FOREGROUND;
+				int noteColor = colorWithReadableForeground(color, CPATTERN_NOTE_FOREGROUND);
+				int commandColor = colorWithReadableForeground(color, CPATTERN_COMMAND_FOREGROUND);
+				int instrumentColor = colorWithReadableForeground(color, CPATTERN_INSTRUMENT_FOREGROUND);
 
-				int instrumentColor = color & 0xff00;	// keep background (stripes)
-				instrumentColor |= CPATTERN_INSTRUMENT_FOREGROUND;
+				color2 = noteColor;
+				color3 = instrumentColor;
+				color4 = commandColor;
+				color5 = noteColor;
 
 				if (n != 93)
 				{
-					color2 = noteColor; // note
 					notEmpty++;
 				}
 
-					if (pattern[patternNumber][p * 4 + 1] != 0)
-					{
-						color3 = instrumentColor;	// instrument
-						notEmpty++;
-					}
-					if (pattern[patternNumber][p * 4 + 2] != 0)
-					{
-						notEmpty++;
-						color4 = commandColor;	// command
-
-						if (pattern[patternNumber][p * 4 + 2] != 0)
-							color5 = noteColor;		// data
-					}
+				if (pattern[patternNumber][p * 4 + 1] != 0)
+				{
+					notEmpty++;
 				}
+				if (pattern[patternNumber][p * 4 + 2] != 0)
+				{
+					notEmpty++;
+				}
+			}
 
 			int dispCursorLine = 1;
 
 			// Display highlight line where cursor is
 			if (p == editorInfo.eppos && dispCursorLine && !invalidColumn && !followplay)
 			{
-				color2 &= 0xff;
-				color2 |= (CPATTERN_HIGHLIGHT_BACKGROUND << 8);
-				color3 &= 0xff;
-				color3 |= (CPATTERN_HIGHLIGHT_BACKGROUND << 8);
-				color4 &= 0xff;
-				color4 |= (CPATTERN_HIGHLIGHT_BACKGROUND << 8);
-				color5 &= 0xff;
-				color5 |= (CPATTERN_HIGHLIGHT_BACKGROUND << 8);
+				color2 = colorWithBackground(color2, CPATTERN_HIGHLIGHT_BACKGROUND);
+				color3 = colorWithBackground(color3, CPATTERN_HIGHLIGHT_BACKGROUND);
+				color4 = colorWithBackground(color4, CPATTERN_HIGHLIGHT_BACKGROUND);
+				color5 = colorWithBackground(color5, CPATTERN_HIGHLIGHT_BACKGROUND);
 			}
 			else
 			{
@@ -964,6 +1039,7 @@ void displayPattern6Chn(GTOBJECT *gt)
 				}
 			}
 
+			debugPrintPatternRow("multi", c, c2, p, patternNumber, gt->chn[c2].lastpattptr, colorNoChange, color2, color3, color4, color5, textbuffer);
 			printtext(PATTERN_X + 5 + c * chnWidth, PATTERN_Y + 1 + d, color2, textbuffer);
 			printtext(PATTERN_X + 8 + c * chnWidth, PATTERN_Y + 1 + d, color3, &textbuffer[3]);
 			printtext(PATTERN_X + 10 + c * chnWidth, PATTERN_Y + 1 + d, color4, &textbuffer[5]);
@@ -1083,7 +1159,7 @@ void displayPattern3Chn(GTOBJECT *gt)
 		//		if ((p% stepsize) == 0)
 		//			color |= CPATTERN_INDEX_HIGHLIGHT;
 		//		else
-		color |= CPATTERN_NOTE_FOREGROUND;
+		color = colorWithReadableForeground(color, CPATTERN_NOTE_FOREGROUND);
 
 		if ((p < 0) || (p > maxpattlen))
 		{
@@ -1100,9 +1176,9 @@ void displayPattern3Chn(GTOBJECT *gt)
 
 			color &= 0xff00;
 			if ((p% stepsize) == 0)
-				color |= CPATTERN_INDEX_HIGHLIGHT;
+				color = colorWithReadableForeground(color, CPATTERN_INDEX_HIGHLIGHT);
 			else
-				color |= CPATTERN_NOTE_FOREGROUND;
+				color = colorWithReadableForeground(color, CPATTERN_NOTE_FOREGROUND);
 
 			if (!(patterndispmode & 1))
 			{
@@ -1274,12 +1350,6 @@ void displayPattern3Chn(GTOBJECT *gt)
 				else if ((p% stepsize) == 0)
 					color = getColor(CPATTERN_FIRST_FOREGROUND1, CPATTERN_FIRST_BACKGROUND1);
 
-				if (gt->chn[c2].lastpattptr == 0x7fffffff)
-				{
-					// Not sure what this will do in this case, so let's see what the screen shows...
-					color = 2;
-					colorNoChange = 1;
-				}
 			}
 
 			if (isValidPatternNumber(gt->chn[c2].lastpattnum) && patternNumber == gt->chn[c2].lastpattnum && isplaying(gt))
@@ -1317,7 +1387,7 @@ void displayPattern3Chn(GTOBJECT *gt)
 					if (colorNoChange == 0)
 					{
 						color &= 0xff00;	// keep background (stripes)
-						color |= CPATTERN_NOTE_FOREGROUND;
+						color = colorWithReadableForeground(color, CPATTERN_NOTE_FOREGROUND);
 						colorNoChange++;
 						//				notEmpty++;
 					}
@@ -1348,7 +1418,7 @@ void displayPattern3Chn(GTOBJECT *gt)
 			if (p == editorInfo.eppos && !invalidColumn)
 			{
 				displayCursor++;
-				color = (color & 0xff00) | CPATTERN_HIGHLIGHT_FOREGROUND;
+				color = colorWithReadableForeground(color, CPATTERN_HIGHLIGHT_FOREGROUND);
 			}
 
 
@@ -1362,32 +1432,27 @@ void displayPattern3Chn(GTOBJECT *gt)
 			{
 				int n = pattern[patternNumber][p * 4] - FIRSTNOTE;
 
-				int noteColor = color & 0xff00;	// keep background (stripes)
-				noteColor |= CPATTERN_NOTE_FOREGROUND;
-				int commandColor = color & 0xff00;	// keep background (stripes)
-				commandColor |= CPATTERN_COMMAND_FOREGROUND;
+				int noteColor = colorWithReadableForeground(color, CPATTERN_NOTE_FOREGROUND);
+				int commandColor = colorWithReadableForeground(color, CPATTERN_COMMAND_FOREGROUND);
+				int instrumentColor = colorWithReadableForeground(color, CPATTERN_INSTRUMENT_FOREGROUND);
 
-				int instrumentColor = color & 0xff00;	// keep background (stripes)
-				instrumentColor |= CPATTERN_INSTRUMENT_FOREGROUND;
+				color2 = noteColor;
+				color3 = instrumentColor;
+				color4 = commandColor;
+				color5 = noteColor;
 
 				if (n != 93)
 				{
-					color2 = noteColor; // note
 					notEmpty++;
 				}
 
 				if (pattern[patternNumber][p * 4 + 1] != 0)
 				{
-					color3 = instrumentColor;	// instrument
 					notEmpty++;
 				}
 				if (pattern[patternNumber][p * 4 + 2] != 0)
 				{
 					notEmpty++;
-					color4 = commandColor;	// command
-
-					if (pattern[patternNumber][p * 4 + 2] != 0)
-						color5 = noteColor;		// data
 				}
 			}
 
@@ -1396,14 +1461,10 @@ void displayPattern3Chn(GTOBJECT *gt)
 			// Display highlight line where cursor is
 			if (p == editorInfo.eppos && dispCursorLine && !invalidColumn && !followplay)
 			{
-				color2 &= 0xff;
-				color2 |= (CPATTERN_HIGHLIGHT_BACKGROUND << 8);
-				color3 &= 0xff;
-				color3 |= (CPATTERN_HIGHLIGHT_BACKGROUND << 8);
-				color4 &= 0xff;
-				color4 |= (CPATTERN_HIGHLIGHT_BACKGROUND << 8);
-				color5 &= 0xff;
-				color5 |= (CPATTERN_HIGHLIGHT_BACKGROUND << 8);
+				color2 = colorWithBackground(color2, CPATTERN_HIGHLIGHT_BACKGROUND);
+				color3 = colorWithBackground(color3, CPATTERN_HIGHLIGHT_BACKGROUND);
+				color4 = colorWithBackground(color4, CPATTERN_HIGHLIGHT_BACKGROUND);
+				color5 = colorWithBackground(color5, CPATTERN_HIGHLIGHT_BACKGROUND);
 			}
 			else
 			{
@@ -1418,6 +1479,7 @@ void displayPattern3Chn(GTOBJECT *gt)
 
 
 			xpos = PATTERN_X + 5;
+			debugPrintPatternRow("3ch", c, c2, p, patternNumber, gt->chn[c2].lastpattptr, colorNoChange, color2, color3, color4, color5, textbuffer);
 			printtext(xpos + (c * chnWidth), PATTERN_Y + 1 + d, color2, textbuffer);		// 4 chars: C-3<space>
 			printtext(xpos + 4 + (c* chnWidth), PATTERN_Y + 1 + d, color3, &textbuffer[4]);	// 2 chars: 00
 			printtext(xpos + 4 + 2 + (c * chnWidth), PATTERN_Y + 1 + d, color4, &textbuffer[4 + 2]);	// 1 char: 1
