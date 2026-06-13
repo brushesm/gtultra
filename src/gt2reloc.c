@@ -93,7 +93,7 @@ char instrfilter[MAX_FILENAME];
 char instrpath[MAX_PATHNAME];
 char packedpath[MAX_PATHNAME];
 char packedsongname[MAX_PATHNAME];
-char *programname = "$VER: GTUltra";
+char *programname = "$VER: GTUltraPro V2.0.0";
 
 char textbuffer[MAX_PATHNAME];
 char debugTextbuffer[MAX_PATHNAME];
@@ -168,7 +168,7 @@ void Log(void *userdata, int category, SDL_LogPriority priority, const char *mes
 
 void usage(void)
 {
-	SDL_Log("Usage: GTULTRA RELOC <songname> <outfile> [options]\n");
+	SDL_Log("Usage: GTULTRAPRO RELOC <songname> <outfile> [options]\n");
 	SDL_Log("Options:\n");
 	SDL_Log("-Axx Set ADSR parameter for hardrestart in hex. DEFAULT=0F00\n");
 	SDL_Log("-Bx  enable/disable buffered SID writes. DEFAULT=disabled\n");

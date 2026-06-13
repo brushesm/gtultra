@@ -9,6 +9,7 @@
 #include "goattrk2.h"
 #include "membuf.h"
 #include "parse.h"
+#include "gmod.h"
 
 char *playeroptname[] =
 {
@@ -221,6 +222,30 @@ static void buildrelocatortitle(char *dest, size_t destSize)
 		appendbounded(dest, destSize, " - ");
 		appendbounded(dest, destSize, loadedsongfilename);
 	}
+}
+
+static int fail_ptmod_export(const char *message)
+{
+#ifdef GT2RELOC
+	fprintf(STDERR, "error: %s\n", message);
+#else
+	clearscreen(getColor(1, 0));
+	printtextc(MAX_ROWS / 2, getColor(CTITLE, 0), message);
+	fliptoscreen();
+	waitkeynoupdate();
+#endif
+	return 0;
+}
+
+static int validate_ptmod_gt_export(void)
+{
+	if (!ptmodState.enabled)
+		return 1;
+
+	if (!ptmodState.valid)
+		return fail_ptmod_export(ptmod_status_text());
+
+	return 1;
 }
 
 
@@ -1986,6 +2011,9 @@ void relocator(GTOBJECT *gt, int gt2relocMode, int autoSave)
 
 	playersize = packedsize - songtblsize - songdatasize - patttblsize - pattdatasize - instrsize - wavetblsize - pulsetblsize - filttblsize - speedtblsize;
 
+	if (!validate_ptmod_gt_export())
+		goto PRCLEANUP;
+
 	// Copy author info
 	if (playerversion & PLAYER_AUTHORINFO)
 	{
@@ -2368,6 +2396,8 @@ void relocator(GTOBJECT *gt, int gt2relocMode, int autoSave)
 	else
 		fwrite(packeddata, packedsize, 1, songhandle);
 	fclose(songhandle);
+	if (ptmodState.enabled)
+		ptmod_write_export_artifacts(packedsongname, playeradr, packedsize, sidPlayAddr);
 
 	songExported = 1;
 	goto PREXPORTCOMPLETE;

@@ -6,6 +6,7 @@
 
 #include "goattrk2.h"
 #include "gsong.h"
+#include "gmod.h"
 
 SNG_INFO songInfo[MAX_SONG_FILES + 1];
 
@@ -339,9 +340,14 @@ int savesong(void)
 			{
 				fwrite8(handle, instr[c].pan);
 			}
-		}
-		fwrite8(handle, 0x9b);	// PAN ID
-		fwrite8(handle, SIDTracker64ForIPadIsAmazing);
+			}
+			fwrite8(handle, 0x9b);	// PAN ID
+			fwrite8(handle, SIDTracker64ForIPadIsAmazing);
+			if (!ptmod_write_sng_chunk(handle))
+			{
+				fclose(handle);
+				return 0;
+			}
 
 
 		fclose(handle);
@@ -414,11 +420,18 @@ int loadsong(GTOBJECT *gt, int gt2relocMode)
 	int ok = 0;
 	char ident[4];
 	unsigned char ID;
+	char preservedPtmodPath[MAX_PATHNAME];
+	int preservedPtmodEnabled;
+	int ptmodChunkLoaded = 0;
 
 	stopScreenDisplay();
 
 	FILE *handle;
 	int channelstoload = MAX_CHN;
+
+	strncpy(preservedPtmodPath, ptmodState.path, sizeof preservedPtmodPath - 1);
+	preservedPtmodPath[sizeof preservedPtmodPath - 1] = 0;
+	preservedPtmodEnabled = ptmodState.enabled;
 
 	if (gt2relocMode == 1)
 	{
@@ -573,6 +586,12 @@ int loadsong(GTOBJECT *gt, int gt2relocMode)
 				if (ID == 0x9b)
 				{
 					SIDTracker64ForIPadIsAmazing = (int)fread8(handle);
+					getNext++;
+				}
+
+				if (ID == PTMOD_SNG_CHUNK_ID)
+				{
+					ptmodChunkLoaded = ptmod_read_sng_chunk(handle);
 					getNext++;
 				}
 			} while (getNext != 0);
@@ -1265,6 +1284,12 @@ int loadsong(GTOBJECT *gt, int gt2relocMode)
 			if (gt2relocMode == 0)
 				songchange(gt, 1);
 		}
+
+		if (!ptmodChunkLoaded)
+		{
+			char ptmodError[256];
+			ptmod_restore(preservedPtmodPath, preservedPtmodEnabled, ptmodError, sizeof ptmodError);
+		}
 	}
 
 
@@ -1665,6 +1690,8 @@ void clearsong(int cs, int cp, int ci, int ct, int cn, GTOBJECT *gt)
 	if (!(cs | cp | ci | ct | cn)) return;
 
 
+	if (cs && cp && ci && ct && cn)
+		ptmod_clear();
 
 	if (gt->songinit != PLAY_STOPPED)
 	{
@@ -1677,6 +1704,23 @@ void clearsong(int cs, int cp, int ci, int ct, int cn, GTOBJECT *gt)
 	editorInfo.etmarknum = -1;
 	editorInfo.esmarkchn = -1;
 	editorInfo.esmarkchnend = -1;
+	editorInfo.ptmodEditRow = 0;
+	editorInfo.ptmodEditPage = 0;
+	editorInfo.ptmodOrderIndex = 0;
+	editorInfo.ptmodStreamRow = 0;
+	editorInfo.ptmodStreamView = 0;
+	editorInfo.ptmodStreamChannel = 0;
+	editorInfo.ptmodStreamField = 0;
+	editorInfo.ptmodStreamFollow = 1;
+	editorInfo.ptmodSampleIndex = 0;
+	editorInfo.ptmodBlockActive = 0;
+	editorInfo.ptmodBlockOrder = 0;
+	editorInfo.ptmodBlockPattern = 0;
+	editorInfo.ptmodBlockRowStart = 0;
+	editorInfo.ptmodBlockRowEnd = 0;
+	editorInfo.ptmodBlockChannelStart = 0;
+	editorInfo.ptmodBlockChannelEnd = 0;
+	editorInfo.ptmodScopeView = 0;
 	followplay = 0;
 
 
@@ -2736,6 +2780,7 @@ int allocateSngMemory(int sngIndex)
 	si->songName = malloc(sizeof(char)* MAX_STR);
 	si->loadedSongFileName = malloc(sizeof(char)*MAX_PATHNAME);
 	si->wavfilename= malloc(sizeof(char)*MAX_PATHNAME);
+	si->ptModPath = malloc(sizeof(char)*MAX_PATHNAME);
 	si->copyrightName = malloc(sizeof(char)* MAX_STR);
 	si->authorName = malloc(sizeof(char)* MAX_STR);
 	si->patternLen = malloc(sizeof(int)*MAX_PATT);
@@ -2794,6 +2839,8 @@ int copyCurrentToSngBuffer(GTOBJECT *gt, int sngIndex)
 	memcpy(si->songName, &songname[0], sizeof(char)* MAX_STR);
 	memcpy(si->loadedSongFileName, &loadedsongfilename[0], sizeof(char)*MAX_PATHNAME);
 	memcpy(si->wavfilename, &wavfilename[0], sizeof(char)*MAX_PATHNAME);
+	memcpy(si->ptModPath, &ptmodState.path[0], sizeof(char)*MAX_PATHNAME);
+	si->ptModEnabled = ptmodState.enabled;
 	memcpy(si->copyrightName, &copyrightname[0], sizeof(char)* MAX_STR);
 	memcpy(si->authorName, &authorname[0], sizeof(char)* MAX_STR);
 	memcpy(si->patternLen, &pattlen[0], sizeof(int)*MAX_PATT);
@@ -2867,6 +2914,10 @@ int copySngBufferToCurrent(GTOBJECT *gt, int sngIndex)
 	memcpy(&songname[0], si->songName, sizeof(char)* MAX_STR);
 	memcpy(&loadedsongfilename[0], si->loadedSongFileName, sizeof(char)*MAX_PATHNAME);
 	memcpy(&wavfilename[0], si->wavfilename, sizeof(char)*MAX_PATHNAME);
+	{
+		char ptmodError[256];
+		ptmod_restore(si->ptModPath, si->ptModEnabled, ptmodError, sizeof ptmodError);
+	}
 	memcpy(&copyrightname[0], si->copyrightName, sizeof(char)* MAX_STR);
 	memcpy(&authorname[0], si->authorName, sizeof(char)* MAX_STR);
 	memcpy(&pattlen[0], si->patternLen, sizeof(int)*MAX_PATT);
@@ -2906,4 +2957,3 @@ unsigned short songOrderTransposeCopyPaste[MAX_CHN][MAX_SONGLEN_EXPANDED];
 		char *songOrderTransposeCopyPasteExpanded;
 	}SNG_INFO;
 	*/
-

@@ -9,6 +9,8 @@
 #define UNDERLINE_MASK 0x8000
 #define UNDERLINE_FOREGROUND_MASK 0x4000
 
+typedef int (*ConsolePixelOverlayCallback)(void *userdata);
+
 int initscreen(void);
 void closescreen(void);
 void clearscreen(int backColor);
@@ -31,6 +33,12 @@ int getColor(int fcolor, int bcolor);
 void forceRedraw();
 void updatescreenlayout(void);
 int getactivescreencolumns(void);
+int getfontwidth(void);
+int getfontheight(void);
+unsigned getmousepixelx(void);
+unsigned getmousepixely(void);
+void setConsolePixelOverlay(ConsolePixelOverlayCallback callback, void *userdata);
+void clearConsolePixelOverlay(void);
 
 #ifndef GCONSOLE_C
 extern int key, rawkey, shiftpressed, cursorflashdelay, ctrlpressed;

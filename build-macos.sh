@@ -10,9 +10,11 @@ Builds GTUltra for macOS into build/macos.
 Requirements:
   - Xcode command line tools
   - SDL2 development package, for example: brew install sdl2
-  - Optional MP4 video support: brew install ffmpeg pkg-config
+  - FFmpeg and pkg-config for default MP4 video support: brew install ffmpeg pkg-config
 
-Set GTULTRA_VIDEO=1 to build optional muted MP4 video playback support.
+MP4 video sync and ProTracker MOD audio preview are built by default.
+Set GTULTRA_VIDEO=0 to build without MP4 video support.
+Set GTULTRA_LIBXMP=0 to build without MOD audio preview.
 USAGE
 }
 
@@ -47,13 +49,15 @@ if ! command -v cc >/dev/null 2>&1; then
     exit 1
 fi
 
-if [[ "${GTULTRA_VIDEO:-0}" == "1" ]]; then
+export GTULTRA_VIDEO="${GTULTRA_VIDEO:-1}"
+
+if [[ "$GTULTRA_VIDEO" == "1" ]]; then
     if ! command -v pkg-config >/dev/null 2>&1; then
-        echo "error: pkg-config was not found. Install optional video dependencies with: brew install ffmpeg pkg-config" >&2
+        echo "error: pkg-config was not found. Install video dependencies with: brew install ffmpeg pkg-config, or set GTULTRA_VIDEO=0" >&2
         exit 1
     fi
     if ! pkg-config --exists libavformat libavcodec libavutil libswscale; then
-        echo "error: FFmpeg development libraries were not found. Install them with: brew install ffmpeg" >&2
+        echo "error: FFmpeg development libraries were not found. Install them with: brew install ffmpeg, or set GTULTRA_VIDEO=0" >&2
         exit 1
     fi
 fi
@@ -63,6 +67,12 @@ SRC_DIR="$ROOT_DIR/src"
 BME_DIR="$SRC_DIR/bme"
 OUT_DIR="$ROOT_DIR/build/macos"
 JOBS="$(sysctl -n hw.ncpu 2>/dev/null || printf '4')"
+export GTULTRA_LIBXMP="${GTULTRA_LIBXMP:-1}"
+
+if [[ "$GTULTRA_LIBXMP" == "1" && ! -f "$ROOT_DIR/3rdparty/libxmp/include/xmp.h" ]]; then
+    echo "error: vendored libxmp was not found at 3rdparty/libxmp" >&2
+    exit 1
+fi
 
 mkdir -p "$OUT_DIR"
 
@@ -96,6 +106,9 @@ build_host_tool() {
 
 echo "Removing stale object files from previous non-macOS builds..."
 find "$SRC_DIR" -name '*.o' -type f -delete
+if [[ -d "$ROOT_DIR/3rdparty/libxmp" ]]; then
+    find "$ROOT_DIR/3rdparty/libxmp" -name '*.o' -type f -delete
+fi
 
 (
     cd "$SRC_DIR"

@@ -11,6 +11,7 @@
 #endif
 
 #include "goattrk2.h"
+#include "gmodplay.h"
 
 extern void JPSoundMixer(Sint32 *dest, unsigned samples);
 
@@ -574,6 +575,8 @@ void JPSoundMixer(Sint32 *dest, unsigned samples)
 	if (!initted) return;
 	if (samples > MIXBUFFERSIZE) return;
 
+	ptmodplay_prepare_sid_events(samples, playspeed, framerate, isplaying(&gtObject));
+
 	if (dest == NULL)
 		sid_fillbuffer(tempbuffer, tempbuffer, tempbuffer, tempbuffer, samples, MIXBUFFERSIZE, editorInfo.adparam);
 	else
@@ -647,6 +650,8 @@ void JPSoundMixer(Sint32 *dest, unsigned samples)
 			dp++;
 
 		}
+
+		ptmodplay_mix(dest, samples, playspeed, framerate, isplaying(&gtObject));
 
 
 		if (writehandle)
@@ -786,6 +791,8 @@ void ExportSIDToPCMFile(int samples,int doNormalize)
 {
 	if (!initted) return;
 	if (samples > MIXBUFFERSIZE) return;
+
+	ptmodplay_prepare_sid_events(samples, playspeed, framerate, isplaying(&gtObject));
 
 	sid_fillbuffer(sid0buffer, sid1buffer, sid2buffer, sid3buffer, samples, MIXBUFFERSIZE, editorInfo.adparam);
 

@@ -17,12 +17,14 @@ typedef struct {
 	char *songName;
 	char *loadedSongFileName;
 	char *wavfilename;
+	char *ptModPath;
 	char *authorName;
 	char *copyrightName;
 	char *patternLen;
 	char *songLen;
 
 	char *editorUndoInfo;
+	int ptModEnabled;
 	int highestUsedPattern;
 	int highestUsedInstr;
 }SNG_INFO;

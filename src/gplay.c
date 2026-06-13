@@ -5,6 +5,8 @@
 #define GPLAY_C
 
 #include "goattrk2.h"
+#include "gmodplay.h"
+#include "gsound.h"
 
 //#define JP_NEW_FEATURES
 
@@ -66,6 +68,41 @@ int releasetimes[16] = { 6, 24, 48, 72, 114, 168, 204, 240, 300, 750, 1500, 2400
 
 void sequencer(int c, CHN *cptr, GTOBJECT *gt);
 
+static void ptmodplay_start_for_sid_mode(int mode, int row, GTOBJECT *gt)
+{
+	int orderIndex = 0;
+
+	if (gt != &gtObject)
+		return;
+	if (bypassPlayRoutine)
+		return;
+	if (mode == PLAY_POS || mode == PLAY_PATTERN)
+		orderIndex = editorInfo.eseditpos;
+	ptmodplay_start_at(orderIndex, row);
+}
+
+static void ptmodplay_sync_to_sid_transport(GTOBJECT *gt)
+{
+	int channel;
+	int orderIndex = 0;
+	int row = 0;
+	int songptr;
+
+	if (gt != &gtObject || gt->songinit == PLAY_STOPPED || gt->songinit == PLAY_STOP)
+		return;
+	channel = gt->masterLoopChannel;
+	if (channel < 0 || channel >= editorInfo.maxSIDChannels || channel >= MAX_PLAY_CH)
+		channel = 0;
+	songptr = gt->chn[channel].songptr;
+	if (gt->lastsonginit == PLAY_PATTERN || !gt->chn[channel].advance)
+		orderIndex = editorInfo.eseditpos;
+	else if (songptr > 0)
+		orderIndex = songptr - 1;
+	if (gt->chn[channel].pattptr >= 0 && gt->chn[channel].pattptr != 0x7fffffff)
+		row = (int)(gt->chn[channel].pattptr / 4);
+	ptmodplay_sync_to_sid(1, orderIndex, row);
+}
+
 void initchannels(GTOBJECT *gt)
 {
 	int c;
@@ -116,6 +153,7 @@ void initsong(int num, int mode, GTOBJECT *gt)
 	gt->songinit = mode;
 	gt->disableLoopSearch = 0;
 	gt->startpattpos = 0;
+	ptmodplay_start_for_sid_mode(mode, 0, gt);
 
 	for (int i = 0;i < MAX_PLAY_CH;i++)
 	{
@@ -135,6 +173,7 @@ void initsongpos(int num, int mode, int pattpos, GTOBJECT *gt)
 	gt->songinit = mode;
 	gt->startpattpos = pattpos;
 	gt->disableLoopSearch = 0;
+	ptmodplay_start_for_sid_mode(mode, pattpos, gt);
 	sound_flush();
 }
 
@@ -147,6 +186,8 @@ void stopsong(GTOBJECT *gt)
 	sound_suspend();
 
 	gt->songinit = PLAY_STOP;
+	if (gt == &gtObject)
+		ptmodplay_stop();
 
 
 	sound_flush();
@@ -1251,6 +1292,7 @@ void playroutine(GTOBJECT *gt)
 
 	if (gt->songinit != PLAY_STOPPED)
 		incrementtime(gt);
+	/* MOD replay has its own ProTracker flow control; sync explicit transport jumps only. */
 
 
 	/*
@@ -1285,13 +1327,14 @@ void playroutine(GTOBJECT *gt)
 				}
 
 				// Reset playing timer
-				gt->timemin = gt->looptimemin;
-				gt->timesec = gt->looptimesec;
-				gt->timeframe = gt->looptimeframe;
+					gt->timemin = gt->looptimemin;
+					gt->timesec = gt->looptimesec;
+					gt->timeframe = gt->looptimeframe;
 
+					ptmodplay_sync_to_sid_transport(gt);
+				}
 			}
 		}
-	}
 	else if (gt->noSIDWrites == 0 && gt->loopEnabledFlag  && gt->disableLoopSearch == 0 && transportLoopPattern)
 	{
 		// Check to see if playback has reached the end of the pattern that is being tracked by the Master Loop Channel
@@ -1335,10 +1378,12 @@ void playroutine(GTOBJECT *gt)
 						else
 						{
 							gt->chn[i].trans = t;
+							}
 						}
+						if (i == gt->masterLoopChannel)
+							ptmodplay_sync_to_sid_transport(gt);
 					}
 				}
-			}
 
 		}
 	}
@@ -1416,7 +1461,6 @@ void playroutine(GTOBJECT *gt)
 		}
 
 	}
-
 }
 
 
@@ -1647,5 +1691,3 @@ int getFilterType(GTOBJECT *gt, int ch)
 	filterTypeBitmask &= 0x7;
 	return filterTypeBitmask;
 }
-
-

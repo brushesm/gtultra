@@ -1,29 +1,29 @@
-# GTUltra 1.1.0 - Based on GoatTracker v2.76 Stereo
+# GTUltraPro 2.0.0 - Based on GoatTracker v2.76 Stereo
 ------------------------
 ## Building on macOS
 
-Install Xcode command line tools and SDL2, then build from the repository root:
+Install Xcode command line tools, SDL2, FFmpeg, and pkg-config, then build from
+the repository root:
 
 ```sh
-brew install sdl2
+brew install sdl2 ffmpeg pkg-config
 ./build-macos.sh
 ```
 
 The script writes binaries to `build/macos` so local builds do not overwrite the tracked release binaries in `mac/`.
 
-Optional muted MP4 video sync support can be enabled with FFmpeg:
+MP4 video sync is built by default. To build without MP4 support:
 
 ```sh
-brew install ffmpeg pkg-config
-GTULTRA_VIDEO=1 ./build-macos.sh
+GTULTRA_VIDEO=0 ./build-macos.sh
 ```
 
 ## Building on Windows
 
-Install MSYS2 MinGW with GCC, GNU Make, binutils, and SDL2 development libraries:
+Install MSYS2 MinGW with GCC, GNU Make, binutils, SDL2, FFmpeg, and pkg-config:
 
 ```sh
-pacman -S --needed base-devel mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-SDL2
+pacman -S --needed base-devel mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-SDL2 mingw-w64-ucrt-x86_64-ffmpeg mingw-w64-ucrt-x86_64-pkgconf
 ```
 
 From an MSYS2 shell, run:
@@ -42,45 +42,46 @@ build-windows.bat
 
 If SDL2 is installed outside the default MinGW search path for the batch script, set `SDL2_PREFIX` first, for example `set SDL2_PREFIX=C:\msys64\mingw64`.
 
-Optional muted MP4 video sync support can be enabled from MSYS2 with FFmpeg. This is only required when `GTULTRA_VIDEO=1` is set; normal Windows builds do not need FFmpeg.
-
-For the recommended UCRT64 MSYS2 shell, install the matching development packages:
+MP4 video sync is built by default from MSYS2 with FFmpeg. To build without MP4
+support:
 
 ```sh
-pacman -S --needed mingw-w64-ucrt-x86_64-ffmpeg mingw-w64-ucrt-x86_64-pkgconf
-GTULTRA_VIDEO=1 ./build-windows-msys2.sh
+GTULTRA_VIDEO=0 ./build-windows-msys2.sh
 ```
 
 If you see this error:
 
 ```text
-error: FFmpeg development libraries were not found. Install the matching MSYS2 ffmpeg package for your MinGW environment.
+error: FFmpeg development libraries were not found. Install the matching MSYS2 ffmpeg package for your MinGW environment, or set GTULTRA_VIDEO=0.
 ```
 
-then `GTULTRA_VIDEO=1` is enabled but `pkg-config` cannot find the FFmpeg headers/import libraries for the active MSYS2 environment. Install the package set that matches the shell/toolchain you are using:
+then the default video-enabled build cannot find the FFmpeg headers/import
+libraries for the active MSYS2 environment. Install the package set that matches
+the shell/toolchain you are using:
 
 - UCRT64: `mingw-w64-ucrt-x86_64-ffmpeg mingw-w64-ucrt-x86_64-pkgconf`
 - MINGW64: `mingw-w64-x86_64-ffmpeg mingw-w64-x86_64-pkgconf`
 - CLANG64: `mingw-w64-clang-x86_64-ffmpeg mingw-w64-clang-x86_64-pkgconf`
 
-To build without MP4 support, leave `GTULTRA_VIDEO` unset:
-
-```sh
-unset GTULTRA_VIDEO
-./build-windows-msys2.sh
-```
-
-From a Windows command prompt, use the same MSYS2 UCRT64 toolchain on `PATH` and set `GTULTRA_VIDEO=1` before running `build-windows.bat`:
+From a Windows command prompt, use the same MSYS2 UCRT64 toolchain on `PATH`
+before running `build-windows.bat`:
 
 ```bat
 set PATH=C:\msys64\ucrt64\bin;%PATH%
-set GTULTRA_VIDEO=1
 build-windows.bat
 ```
 
-The video-enabled build still needs the MSYS2 FFmpeg development package for headers, import libraries, and `pkg-config`. The repository also carries a baseline runtime DLL set in `win32/`, derived from the MSYS2 UCRT64 `mingw-w64-ucrt-x86_64-ffmpeg` package. When `GTULTRA_VIDEO=1`, the MSYS2 build script copies the listed runtime DLLs and then discovers the actual DLL dependency closure from the built executables, so `build/windows` matches the installed MSYS2 package versions.
+The default video-enabled build still needs the MSYS2 FFmpeg development package
+for headers, import libraries, and `pkg-config`. The repository also carries a
+baseline runtime DLL set in `win32/`, derived from the MSYS2 UCRT64
+`mingw-w64-ucrt-x86_64-ffmpeg` package. When video support is enabled, the
+MSYS2 build script copies the listed runtime DLLs and then discovers the actual
+DLL dependency closure from the built executables, so `build/windows` matches
+the installed MSYS2 package versions.
 
-The vendored `win32/*.dll` files are runtime DLLs only. They do not replace the FFmpeg development headers, import libraries, or `pkg-config` metadata needed to compile a `GTULTRA_VIDEO=1` build.
+The vendored `win32/*.dll` files are runtime DLLs only. They do not replace the
+FFmpeg development headers, import libraries, or `pkg-config` metadata needed to
+compile the default video-enabled build.
 
 Video-enabled Windows builds intentionally do not use the full `-static` linker flag. FFmpeg is linked through the MSYS2 import libraries and shipped with the DLLs listed below. This avoids pulling in FFmpeg's large static dependency graph, which can produce missing `-ldl`/`-lshaderc_shared` errors or Rust duplicate-symbol failures from optional codec libraries.
 
@@ -91,11 +92,13 @@ For a distributable Windows video build, include these files from `build/windows
 - `SDL2.dll`
 - every FFmpeg/runtime DLL copied from `win32/ffmpeg-runtime-dlls.txt`
 
-If you intentionally refresh FFmpeg to a different MSYS2 package version, replace the DLLs in `win32/`, update `win32/ffmpeg-runtime-dlls.txt`, and rebuild. `FFMPEG_PREFIX` is only a fallback for missing vendored DLLs or for a deliberate refresh, for example `set FFMPEG_PREFIX=C:\msys64\ucrt64`. If a video-enabled Windows build succeeds but `gtultra.exe` does not start, rebuild with `GTULTRA_VIDEO=1 ./build-windows-msys2.sh` so the runtime DLL closure is regenerated in `build/windows`.
+If you intentionally refresh FFmpeg to a different MSYS2 package version, replace the DLLs in `win32/`, update `win32/ffmpeg-runtime-dlls.txt`, and rebuild. `FFMPEG_PREFIX` is only a fallback for missing vendored DLLs or for a deliberate refresh, for example `set FFMPEG_PREFIX=C:\msys64\ucrt64`. If a video-enabled Windows build succeeds but `gtultra.exe` does not start, rebuild with `./build-windows-msys2.sh` so the runtime DLL closure is regenerated in `build/windows`.
 
-## Optional MP4 Video Sync
+## MP4 Video Sync
 
-When built with `GTULTRA_VIDEO=1`, GTUltra can load a muted MP4 reference video in a separate SDL window. Music playback remains the master clock: video follows play, stop, restart, seek, rewind, fast-forward, and pattern loop resets.
+In the default build, GTUltra can load a muted MP4 reference video in a separate
+SDL window. Music playback remains the master clock: video follows play, stop,
+restart, seek, rewind, fast-forward, and pattern loop resets.
 
 - `Ctrl+F10`: load an MP4 video for the current session.
 - `Ctrl+Shift+F10`: close the video window.
@@ -115,6 +118,28 @@ By default the converter writes binary `.orm` and `.orb` files when the tune fit
 
 See `docs/gtultra-to-1raster.md` for composing guidelines and conversion limits.
 
+## ProTracker MOD Support
+
+`Ctrl+Shift+F9` loads a 31-sample, 4-channel ProTracker `.mod` file. GTUltra
+saves the MOD path and runtime mixer settings in `.sng` files, and
+`Ctrl+Shift+F8` opens a dedicated MOD editor for pattern cells, order entries,
+title editing, and sample management. When the MOD editor is active, `F11`
+saves the current `.mod` file and `Shift+F11` opens Save As.
+
+MOD preview follows GTUltra transport start, stop, play-from-position, and GT
+loop resets using the same numeric order and row, with `Ctrl+F`, the side-panel
+Follow button, or the forward transport icon enabling editor follow/scroll. The
+MOD editor also supports an effect picker on the effect fields, `Ctrl+W` sample
+waveform editing and audition, `Ctrl+I` sample
+import/replace including raw/WAV/8SVX, `Ctrl+E` sample export, `Ctrl+D` sample
+delete, and MOD-aware `Ctrl+Z` undo with `Ctrl+Y` redo.
+
+Audio preview is mixed through the vendored libxmp player in `3rdparty/libxmp`
+by default. Set `GTULTRA_LIBXMP=0` when building to keep MOD loading, editing,
+and saving available while disabling audio preview.
+
+See `docs/ptmod-support.md` for details and current export limits.
+
 ## Attribution
  - Original Editor by Lasse Öörni (loorni@gmail.com)
  - HardSID 4U support by Téli Sándor. 
@@ -128,6 +153,7 @@ See `docs/gtultra-to-1raster.md` for composing guidelines and conversion limits.
  - Microtonal support by Birgit Jauernig.
  - GTUltra: Editor + 6510 code changes: Jason Page
  - Uses RtMidi library Distributed under GNU General Public License (see the file COPYING for details)
+ - Uses libxmp for ProTracker MOD host preview (see `3rdparty/libxmp/docs/COPYING` for details)
  - Covert BitOps homepage: http://covertbitops.c64.org
  - GoatTracker 2 SourceForge.net page: http://sourceforge.net/projects/goattracker2
 

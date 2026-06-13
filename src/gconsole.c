@@ -42,6 +42,8 @@ int mousesizex = 11;
 int mousesizey = 20;
 unsigned bigwindow = 1;
 static int activeScreenColumns = DEFAULT_COLUMNS;
+static ConsolePixelOverlayCallback pixelOverlayCallback = NULL;
+static void *pixelOverlayUserdata = NULL;
 
 void loadexternalpalette(void);
 void initicon(void);
@@ -174,6 +176,40 @@ int initscreen(void)
 int getactivescreencolumns(void)
 {
 	return activeScreenColumns;
+}
+
+int getfontwidth(void)
+{
+	return fontwidth;
+}
+
+int getfontheight(void)
+{
+	return fontheight;
+}
+
+unsigned getmousepixelx(void)
+{
+	return mousepixelx;
+}
+
+unsigned getmousepixely(void)
+{
+	return mousepixely;
+}
+
+void setConsolePixelOverlay(ConsolePixelOverlayCallback callback, void *userdata)
+{
+	pixelOverlayCallback = callback;
+	pixelOverlayUserdata = userdata;
+}
+
+void clearConsolePixelOverlay(void)
+{
+	if (pixelOverlayCallback)
+		gfx_redraw = 1;
+	pixelOverlayCallback = NULL;
+	pixelOverlayUserdata = NULL;
 }
 
 void updatescreenlayout(void)
@@ -765,8 +801,10 @@ void fliptoscreen(void)
 
 	}
 
+	if (pixelOverlayCallback && pixelOverlayCallback(pixelOverlayUserdata))
+		regionschanged = 1;
 
-	// Redraw mouse if text was redrawn
+	// Redraw mouse if text or pixel overlays were redrawn
 	if (regionschanged)
 	{
 		int sy = mousepixely / fontheight;

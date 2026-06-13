@@ -46,6 +46,19 @@ SIDFP *sidfp2 = 0;
 SIDFP *sidfp3 = 0;
 SIDFP *sidfp4 = 0;
 
+#define SID_MAX_WRITE_EVENTS 4096
+
+typedef struct
+{
+	int sidIndex;
+	int cycle;
+	unsigned char offset;
+	unsigned char value;
+} SID_WRITE_EVENT;
+
+static SID_WRITE_EVENT sidWriteEvents[SID_MAX_WRITE_EVENTS];
+static int sidWriteEventCount = 0;
+
 extern unsigned residdelay;
 //extern unsigned editorInfo.adparam;
 
@@ -56,7 +69,6 @@ void sid_init(int speed, unsigned m, unsigned ntsc, unsigned interpolate, unsign
 {
 
 	int c;
-
 	if (ntsc) clockrate = NTSCCLOCKRATE;
 	else clockrate = PALCLOCKRATE;
 
@@ -270,6 +282,78 @@ unsigned char sid_getorder(unsigned char index,unsigned int adparam)
 		return sidorder[index];
 }
 
+int sid_get_clockrate(void)
+{
+	return clockrate;
+}
+
+int sid_get_samplerate(void)
+{
+	return samplerate;
+}
+
+void sid_clear_write_events(void)
+{
+	sidWriteEventCount = 0;
+}
+
+void sid_queue_write_event(int sidIndex, int cycle, unsigned char offset, unsigned char value)
+{
+	SID_WRITE_EVENT *event;
+
+	if (sidIndex < 0 || sidIndex > 3 || offset >= NUMSIDREGS || sidWriteEventCount >= SID_MAX_WRITE_EVENTS)
+		return;
+	if (cycle < 0)
+		cycle = 0;
+	event = &sidWriteEvents[sidWriteEventCount++];
+	event->sidIndex = sidIndex;
+	event->cycle = cycle;
+	event->offset = offset;
+	event->value = value;
+}
+
+static int sid_clock_all(int cycles, short *lptr, short *rptr, short *lptr2, short *rptr2, int samples, int bufferHalfSize)
+{
+	int result = 0;
+
+	if (cycles <= 0 || samples <= 0)
+		return 0;
+	if (sid) result = sid->clock(cycles, lptr, samples, bufferHalfSize);
+	if (sidfp) result = sidfp->clock(cycles, lptr, samples, bufferHalfSize);
+	if (sid2) sid2->clock(cycles, rptr, samples, bufferHalfSize);
+	if (sidfp2) sidfp2->clock(cycles, rptr, samples, bufferHalfSize);
+	if (sid3) sid3->clock(cycles, lptr2, samples, bufferHalfSize);
+	if (sidfp3) sidfp3->clock(cycles, lptr2, samples, bufferHalfSize);
+	if (sid4) sid4->clock(cycles, rptr2, samples, bufferHalfSize);
+	if (sidfp4) sidfp4->clock(cycles, rptr2, samples, bufferHalfSize);
+	return result;
+}
+
+static void sid_write_event(const SID_WRITE_EVENT *event)
+{
+	if (!event)
+		return;
+	switch (event->sidIndex)
+	{
+	case 0:
+		if (sid) sid->write(event->offset, event->value);
+		if (sidfp) sidfp->write(event->offset, event->value);
+		break;
+	case 1:
+		if (sid2) sid2->write(event->offset, event->value);
+		if (sidfp2) sidfp2->write(event->offset, event->value);
+		break;
+	case 2:
+		if (sid3) sid3->write(event->offset, event->value);
+		if (sidfp3) sidfp3->write(event->offset, event->value);
+		break;
+	case 3:
+		if (sid4) sid4->write(event->offset, event->value);
+		if (sidfp4) sidfp4->write(event->offset, event->value);
+		break;
+	}
+}
+
 int sdb = 0;
 int sid_debug()
 {
@@ -289,11 +373,14 @@ int sid_fillbuffer(short *lptr, short *rptr, short *lptr2, short *rptr2, int sam
 	int result = 0;
 	int total = 0;
 	int c;
-
 	int badline = rand() % NUMSIDREGS;
 
 	tdelta = clockrate * samples / samplerate;
-	if (tdelta <= 0) return total;
+	if (tdelta <= 0)
+	{
+		sid_clear_write_events();
+		return total;
+	}
 
 
 	for (c = 0; c < NUMSIDREGS; c++)
@@ -384,7 +471,41 @@ int sid_fillbuffer(short *lptr, short *rptr, short *lptr2, short *rptr2, int sam
 		samples -= result;
 		tdelta -= SIDWRITEDELAY;
 
-		if (tdelta <= 0) return total;
+		if (tdelta <= 0)
+		{
+			sid_clear_write_events();
+			return total;
+		}
+	}
+
+	if (sidWriteEventCount > 0)
+	{
+		int e;
+		int eventElapsed = 0;
+
+		for (e = 0; e < sidWriteEventCount && tdelta > 0 && samples > 0; e++)
+		{
+			int deltaToEvent = sidWriteEvents[e].cycle - eventElapsed;
+
+			if (deltaToEvent < 0)
+				deltaToEvent = 0;
+			if (deltaToEvent > tdelta)
+				break;
+			if (deltaToEvent > 0)
+			{
+				result = sid_clock_all(deltaToEvent, lptr, rptr, lptr2, rptr2, samples, bufferHalfSize);
+				total += result;
+				lptr += result;
+				rptr += result;
+				lptr2 += result;
+				rptr2 += result;
+				samples -= result;
+				tdelta -= deltaToEvent;
+				eventElapsed += deltaToEvent;
+			}
+			sid_write_event(&sidWriteEvents[e]);
+		}
+		sid_clear_write_events();
 	}
 
 	tdelta2 = tdelta;

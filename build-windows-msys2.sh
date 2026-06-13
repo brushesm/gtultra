@@ -10,9 +10,12 @@ Builds GTUltra, gtasm, and gtultra2raster for Windows into build/windows from an
 Requirements:
   pacman -S --needed base-devel mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-SDL2
 
-Optional MP4 video support:
+Default MP4 video support:
   pacman -S --needed mingw-w64-ucrt-x86_64-ffmpeg mingw-w64-ucrt-x86_64-pkgconf
-  GTULTRA_VIDEO=1 ./build-windows-msys2.sh
+
+MP4 video sync and ProTracker MOD audio preview are built by default.
+Set GTULTRA_VIDEO=0 to build without MP4 video support.
+Set GTULTRA_LIBXMP=0 to build without MOD audio preview.
 
 The script also works with mingw64 or clang64 toolchains if those are installed.
 USAGE
@@ -48,6 +51,8 @@ root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 src_dir="$root_dir/src"
 bme_dir="$src_dir/bme"
 out_dir="$root_dir/build/windows"
+export GTULTRA_VIDEO="${GTULTRA_VIDEO:-1}"
+export GTULTRA_LIBXMP="${GTULTRA_LIBXMP:-1}"
 
 have_mingw_gcc() {
     command -v gcc >/dev/null 2>&1 && gcc -dumpmachine 2>/dev/null | grep -qi 'mingw'
@@ -207,6 +212,7 @@ copy_runtime_files() {
 			"$out_dir/gtultra.exe" \
 			"$out_dir/gt2reloc.exe"
 	fi
+
 }
 
 activate_mingw_toolchain
@@ -215,14 +221,19 @@ require_tool gcc
 require_tool g++
 require_tool windres
 require_tool strip
-if [[ "${GTULTRA_VIDEO:-0}" == "1" ]]; then
+if [[ "$GTULTRA_VIDEO" == "1" ]]; then
 	require_tool objdump
 fi
 
-if [[ "${GTULTRA_VIDEO:-0}" == "1" ]]; then
+if [[ "$GTULTRA_LIBXMP" == "1" && ! -f "$root_dir/3rdparty/libxmp/include/xmp.h" ]]; then
+    echo "error: vendored libxmp was not found at 3rdparty/libxmp" >&2
+    exit 1
+fi
+
+if [[ "$GTULTRA_VIDEO" == "1" ]]; then
     require_tool pkg-config
     if ! pkg-config --exists libavformat libavcodec libavutil libswscale; then
-        echo "error: FFmpeg development libraries were not found. Install the matching MSYS2 ffmpeg package for your MinGW environment." >&2
+        echo "error: FFmpeg development libraries were not found. Install the matching MSYS2 ffmpeg package for your MinGW environment, or set GTULTRA_VIDEO=0." >&2
         exit 1
     fi
 fi
@@ -231,6 +242,9 @@ if [[ "$target" == "clean" ]]; then
     echo "Cleaning Windows build outputs..."
     rm -f "$out_dir"/*.exe "$out_dir"/SDL2.dll "$out_dir"/gtultra.cfg
     find "$src_dir" -name '*.o' -type f -delete
+    if [[ -d "$root_dir/3rdparty/libxmp" ]]; then
+        find "$root_dir/3rdparty/libxmp" -name '*.o' -type f -delete
+    fi
     echo "Clean complete."
     exit 0
 fi
@@ -240,6 +254,9 @@ mkdir -p "$out_dir"
 echo "Using toolchain: $(gcc -dumpmachine)"
 echo "Removing stale object files from previous non-Windows builds..."
 find "$src_dir" -name '*.o' -type f -delete
+if [[ -d "$root_dir/3rdparty/libxmp" ]]; then
+    find "$root_dir/3rdparty/libxmp" -name '*.o' -type f -delete
+fi
 
 echo "Building BME helper tools..."
 (
@@ -251,7 +268,7 @@ libs='-lmingw32 -mwindows -lSDL2main -lSDL2 -lwinmm -lsetupapi -lole32 -loleaut3
 if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists sdl2; then
     libs="$(pkg-config --static --libs sdl2) -lwinmm -lsetupapi -lole32 -loleaut32 -limm32 -lversion -lcfgmgr32 -static-libstdc++ -static-libgcc -static"
 fi
-if [[ "${GTULTRA_VIDEO:-0}" == "1" ]]; then
+if [[ "$GTULTRA_VIDEO" == "1" ]]; then
     libs=" $libs "
     libs="${libs// -static / }"
     libs="${libs# }"
@@ -265,7 +282,8 @@ echo "Building GTUltra Windows binaries..."
         PREFIX=../build/windows/ \
         DATAFILE=./bme/datafile.exe \
         DAT2INC=./bme/dat2inc.exe \
-        GTULTRA_VIDEO="${GTULTRA_VIDEO:-0}" \
+        GTULTRA_VIDEO="$GTULTRA_VIDEO" \
+        GTULTRA_LIBXMP="$GTULTRA_LIBXMP" \
         "CFLAGS=-std=gnu17 -Ibme -Iasm -O3 -Wall" \
         "LIBS=$libs"
 )

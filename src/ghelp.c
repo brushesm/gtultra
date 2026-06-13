@@ -37,7 +37,9 @@ void onlinehelp(int standalone,int context,GTOBJECT *gt)
     "SHIFT+F5-F6 Change speed editorInfo.multiplier",
     "SHIFT+F7 Change hardrestart ADSR",
     "SHIFT+F8 Switch between 6581/8580 SID",
+    "CTRL+SHIFT+F8 ProTracker MOD runtime page",
     "SHIFT+F9 Switch between mono and stereo",
+    "CTRL+SHIFT+F9 Load ProTracker MOD source",
     "SHIFT+F10 Merge-load song",
     "CTRL+F10 Load MP4 video",
     "SHIFT+, . Move song startpos & restart",
@@ -309,12 +311,33 @@ void onlinehelp(int standalone,int context,GTOBJECT *gt)
     left = printrows(0,left, getColor(7,0), instparm);
     left++;
     break;
-      case EDIT_NAMES:
-    printtext(0, left++, getColor(HELP_HEADER,0), "SONGNAME EDIT MODE");
-    printtext(0, left++, getColor(HELP_HEADER,0), "Use cursor UP/DOWN to change rows");
-    left++;
-    break;
-      case EDIT_TABLES:
+	      case EDIT_NAMES:
+	    printtext(0, left++, getColor(HELP_HEADER,0), "SONGNAME EDIT MODE");
+	    printtext(0, left++, getColor(HELP_HEADER,0), "Use cursor UP/DOWN to change rows");
+	    left++;
+	    break;
+	      case EDIT_MOD:
+	    printtext(0, left++, getColor(HELP_HEADER,0), "PROTRACKER MOD MODE");
+	    printtext(0, left++, getColor(HELP_NORMAL,0), "CLICK Pattern/options pane to focus it");
+	    printtext(0, left++, getColor(HELP_NORMAL,0), "QWERTY note keys enter notes on note field");
+	    printtext(0, left++, getColor(HELP_NORMAL,0), "UP/DOWN Move MOD pattern row");
+	    printtext(0, left++, getColor(HELP_NORMAL,0), "CTRL+UP/DOWN Change MOD order position");
+	    printtext(0, left++, getColor(HELP_NORMAL,0), "LEFT/RIGHT Move note/sample/effect field");
+	    printtext(0, left++, getColor(HELP_NORMAL,0), "HEX Edit sample/effect fields, DEL clears");
+	    printtext(0, left++, getColor(HELP_NORMAL,0), "ENTER on effect opens template picker");
+	    printtext(0, left++, getColor(HELP_NORMAL,0), "CTRL+Z Undo, CTRL+Y redo MOD edit");
+	    printtext(0, left++, getColor(HELP_NORMAL,0), "CTRL+F/side Follow/Forward toggles scroll");
+	    printtext(0, left++, getColor(HELP_NORMAL,0), "Side focus: title/length/order/mixer/sample");
+	    printtext(0, left++, getColor(HELP_NORMAL,0), "Side order: HEX or LEFT/RIGHT edits pattern");
+	    printtext(0, left++, getColor(HELP_NORMAL,0), "Side order: INS inserts, DEL removes");
+	    printtext(0, left++, getColor(HELP_NORMAL,0), "Sample rows: ENTER opens waveform editor");
+	    printtext(0, left++, getColor(HELP_NORMAL,0), "CTRL+I/E/D Import/export/delete sample");
+	    printtext(0, left++, getColor(HELP_NORMAL,0), "CTRL+W opens sample editor, A auditions");
+	    printtext(0, left++, getColor(HELP_NORMAL,0), "CTRL+N/R/U New/reload/unload MOD");
+	    printtext(0, left++, getColor(HELP_NORMAL,0), "F11 Save MOD, SHIFT+F11 Save MOD As");
+	    left++;
+	    break;
+	      case EDIT_TABLES:
     printtext(0,left++, getColor(HELP_HEADER,0), "INSTRUMENT/TABLE EDIT MODE");
     left = printrows(0,left++, getColor(7,0), instkeys);
     left++;

@@ -1,5 +1,10 @@
 /build/
 /src/**/*.o
+/3rdparty/libxmp/**/*.o
+/3rdparty/libxmp/**/*.a
+/3rdparty/libxmp/**/*.dylib
+/3rdparty/libxmp/**/*.so
+/3rdparty/libxmp/**/*.dll
 /src/bme/datafile
 /src/bme/dat2inc
 /tools/gtultra2raster/gtultra2raster

@@ -10,6 +10,16 @@ STRIP?=strip
 STRIP_FAIL_OK?=
 VIDEO_PKGS=libavformat libavcodec libavutil libswscale
 VIDEO_PKG_CONFIG_LIBS?=--libs
+GTULTRA_VIDEO?=1
+GTULTRA_LIBXMP?=1
+LIBXMP_VENDOR_DIR?=../3rdparty/libxmp
+LIBXMP_LITE_DIR=$(LIBXMP_VENDOR_DIR)/src/lite
+LIBXMP_LITE_OBJ_NAMES=lite-virtual.o lite-format.o lite-period.o lite-player.o lite-read_event.o \
+lite-misc.o lite-dataio.o lite-lfo.o lite-scan.o lite-control.o lite-filter.o \
+lite-effects.o lite-mixer.o lite-mix_all.o lite-load_helpers.o lite-load.o \
+lite-filetype.o lite-hio.o lite-smix.o lite-memio.o lite-rng.o lite-win32.o \
+lite-flow.o lite-common.o lite-itsex.o lite-sample.o lite-xm_load.o \
+lite-mod_load.o lite-s3m_load.o lite-it_load.o
 
 ifeq ($(GTULTRA_VIDEO),1)
 VIDEO_CFLAGS:=$(shell pkg-config --cflags $(VIDEO_PKGS))
@@ -20,9 +30,17 @@ override LIBS+=$(VIDEO_LIBS)
 GTULTRA_VIDEO_OBJS=gvideo.o
 endif
 
+ifeq ($(GTULTRA_LIBXMP),1)
+LIBXMP_OBJS=$(addprefix $(LIBXMP_LITE_DIR)/,$(LIBXMP_LITE_OBJ_NAMES))
+LIBXMP_CFLAGS=-DLIBXMP_STATIC -I$(LIBXMP_VENDOR_DIR)/include -I$(LIBXMP_VENDOR_DIR)/src -I$(LIBXMP_VENDOR_DIR)/src/loaders
+override CFLAGS+=-DGTULTRA_LIBXMP $(LIBXMP_CFLAGS)
+override CXXFLAGS+=-DGTULTRA_LIBXMP $(LIBXMP_CFLAGS)
+endif
+
 GTULTRA_APP_OBJS=goatdata.o gt2stereo.o gsong.o gorder.o gpattern.o ginstr.o gtable.o gplay.o gdisplay.o gtabledisplay.o \
-gfile.o greloc.o ghelp.o gsound.o gconsole.o gsid.o ginfo.o gmidi.o gundo.o gchareditor.o RtMidi.o gmidiselect.o gpaletteeditor.o gfkeys.o \
+gfile.o greloc.o ghelp.o gsound.o gconsole.o gsid.o ginfo.o gmidi.o gundo.o gchareditor.o RtMidi.o gmidiselect.o gpaletteeditor.o gfkeys.o gmod.o gmodplay.o \
 $(GTULTRA_VIDEO_OBJS) \
+$(LIBXMP_OBJS) \
 resid/envelope.o resid/extfilt.o resid/filter.o resid/pot.o resid/sid.o resid/wave.o resid/wave6581__ST.o \
 resid/wave6581_P_T.o resid/wave6581_PS_.o resid/wave6581_PST.o resid/wave8580__ST.o resid/wave8580_P_T.o \
 resid/wave8580_PS_.o resid/wave8580_PST.o resid/voice.o \
@@ -51,8 +69,9 @@ endif
 # it would be nice not having to link things like resid, however the source is
 # not ready for that
 $(PREFIX)gt2reloc$(SUFFIX): goatdata.o gt2reloc.o gsong.o gorder.o gpattern.o ginstr.o gtable.o gplay.o gdisplay.o \
-	gfile.o ghelp.o gsound.o gconsole.o gsid.o ginfo.o gmidi.o gundo.o gchareditor.o RtMidi.o gmidiselect.o gpaletteeditor.o gfkeys.o \
+	gfile.o ghelp.o gsound.o gconsole.o gsid.o ginfo.o gmidi.o gundo.o gchareditor.o RtMidi.o gmidiselect.o gpaletteeditor.o gfkeys.o gmod.o gmodplay.o \
 	$(GTULTRA_VIDEO_OBJS) \
+	$(LIBXMP_OBJS) \
 resid/envelope.o resid/extfilt.o resid/filter.o resid/pot.o resid/sid.o resid/wave.o resid/wave6581__ST.o \
 resid/wave6581_P_T.o resid/wave6581_PS_.o resid/wave6581_PST.o resid/wave8580__ST.o resid/wave8580_P_T.o \
 resid/wave8580_PS_.o resid/wave8580_PST.o resid/voice.o \
@@ -88,12 +107,22 @@ gt2stereo.dat: player.s altplayer.s player3.s altplayer3.s player9.s altplayer9.
 goatdata.c: gt2stereo.dat
 	$(DAT2INC) $< $@
 
+%.o: %.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+%.o: %.cpp
+	$(CXX) $(CXXFLAGS) -c -o $@ $<
+
+$(LIBXMP_LITE_DIR)/%.o: $(LIBXMP_LITE_DIR)/%.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
 clean:
 	$(RM) *.o *~
 	$(RM) asm/*.o
 	$(RM) bme/*.o
 	$(RM) resid/*.o
 	$(RM) resid-fp/*.o
+	$(RM) $(LIBXMP_OBJS)
 	$(RM) $(EXE)
 
 asm/lexyy.o: override CFLAGS += -Wno-unused-function

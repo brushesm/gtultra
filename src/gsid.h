@@ -28,6 +28,10 @@ int sid_debug();
 void sid_init(int speed, unsigned m, unsigned ntsc, unsigned interpolate, unsigned customclockrate, unsigned usefp);
 int sid_fillbuffer(short *lptr, short *rptr, short* lptr2, short* rptr2, int samples, int bufferHalfSize, unsigned int adparam);
 unsigned char sid_getorder(unsigned char index, unsigned int adparam);
+int sid_get_clockrate(void);
+int sid_get_samplerate(void);
+void sid_clear_write_events(void);
+void sid_queue_write_event(int sidIndex, int cycle, unsigned char offset, unsigned char value);
 
 #ifndef GSID_C
 extern unsigned char sidreg[NUMSIDREGS];

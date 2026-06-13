@@ -44,6 +44,7 @@
 #define EDIT_INSTRUMENT 2
 #define EDIT_TABLES 3
 #define EDIT_NAMES 4
+#define EDIT_MOD 5
 
 //For EDITOR_INFO.editTableMode 
 #define EDIT_TABLE_NONE 0

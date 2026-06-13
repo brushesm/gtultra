@@ -9,7 +9,7 @@ and this project follows the existing GTUltra/GoatTracker versioning scheme.
 
 ### Added
 
-- Added optional `GTULTRA_VIDEO=1` MP4 video sync support using FFmpeg/libav and a separate muted SDL video window.
+- Added default-on MP4 video sync support using FFmpeg/libav and a separate muted SDL video window.
 - Added `Ctrl+F10` to load a session-only MP4 video and `Ctrl+Shift+F10` to close the video window in video-enabled builds.
 - Added vendored MSYS2 UCRT64 FFmpeg runtime DLLs under `win32/` with `win32/ffmpeg-runtime-dlls.txt` for Windows video-enabled distributions.
 - Added `gtultra2raster`, an experimental converter from GTUltra/GoatTracker `.sng` files to Hermit's 1raster tracker formats.
@@ -28,12 +28,17 @@ and this project follows the existing GTUltra/GoatTracker versioning scheme.
 - Added `FORMAT_ASM` to the packer/relocator export formats.
 - Added packer/relocator ASM source output, including author-info patching for generated assembler source.
 - Added persistent relocator SID2, SID3, and SID4 address settings to the GTUltra configuration file.
+- Replaced the experimental ThcMOD source-bundle path with ProTracker `.mod` support: `Ctrl+Shift+F9` loads 31-sample 4-channel modules, `.sng` files persist the MOD path and mixer settings, `Ctrl+Shift+F8` opens a dedicated MOD pattern/order/sample editor, `F11` saves the current MOD file, `Shift+F11` saves as a new MOD path, and host preview mixes through the vendored libxmp player by default.
+- Added MOD title editing, MOD-aware undo/redo, ProTracker effect helper/validation text plus an effect picker/template menu, side-panel and forward-transport Follow toggles, and sample import/replace/delete/export with raw signed 8-bit, simple PCM WAV, and uncompressed IFF/8SVX handling.
+- Added a modal MOD sample waveform editor with visible crop and loop markers, mouse-drag marker editing, crop/trim, loop apply, resampling controls, and sample audition.
+- Vendored libxmp under `3rdparty/libxmp` for ProTracker MOD preview builds.
 
 ### Changed
 
 - Changed SDL event routing so optional secondary video-window events do not affect the main GTUltra editor window.
 - Changed GTUltra application makefile object ownership to use one shared app object list for normal and Windows custom targets.
-- Changed Windows build scripts to copy the vendored FFmpeg runtime DLL set into `build/windows` when `GTULTRA_VIDEO=1`.
+- Changed Windows build scripts to copy the vendored FFmpeg runtime DLL set into `build/windows` when video support is enabled.
+- Changed common make and platform build scripts so MP4 video sync and ProTracker MOD preview are enabled by default, with `GTULTRA_VIDEO=0` and `GTULTRA_LIBXMP=0` as explicit opt-outs.
 - Changed macOS builds to remove stale object files before compiling to avoid mixing object files from other platforms.
 - Updated `README.md` with macOS, Windows, MSYS2, and 1raster converter build/use instructions.
 - Changed local build outputs to use `build/macos` and `build/windows` so development builds do not overwrite tracked release binaries.
@@ -44,6 +49,7 @@ and this project follows the existing GTUltra/GoatTracker versioning scheme.
 - Changed MSYS2 builds to remove stale object files before compiling to avoid mixing macOS/Linux and Windows objects.
 - Changed MSYS2 SDL2 linking to include the required Windows system libraries for static SDL2 builds.
 - Changed the relocator UI/title string building to use bounded string appends.
+- Changed the program-facing name/version to GTUltraPro 2.0.0.
 - Changed relocator SID address handling to validate SID2/SID3/SID4 addresses and preserve legacy packed SID address compatibility.
 - Changed ASM label and address emission in the relocator to avoid fixed 80-byte temporary buffers.
 - Changed the embedded assembler wrapper to disable parser debug spew during normal assembly.

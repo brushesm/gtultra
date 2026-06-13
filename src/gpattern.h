@@ -85,6 +85,25 @@ typedef struct {
 	int etDetailedWaveTableColumn;
 	int expandOrderListView;
 
+		int ptmodEditRow;
+		int ptmodEditPage;
+		int ptmodOrderIndex;
+		int ptmodStreamRow;
+	int ptmodStreamView;
+	int ptmodStreamChannel;
+	int ptmodStreamField;
+	int ptmodStreamSubColumn;
+	int ptmodStreamFollow;
+	int ptmodSampleIndex;
+	int ptmodBlockActive;
+	int ptmodBlockOrder;
+	int ptmodBlockPattern;
+	int ptmodBlockRowStart;
+	int ptmodBlockRowEnd;
+	int ptmodBlockChannelStart;
+	int ptmodBlockChannelEnd;
+	int ptmodScopeView;
+
 }EDITOR_INFO;
 
 extern EDITOR_INFO editorInfo;

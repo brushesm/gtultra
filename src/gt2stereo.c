@@ -1,5 +1,5 @@
 //
-// GTULTRA V1.5.3
+// GTUltraPro V2.0.0
 // Based on source code of GOATTRACKER v2.76 Stereo
 //
 // This program is free software; you can redistribute it and/or modify
@@ -31,14 +31,2967 @@
 
 #include "goattrk2.h"
 #include "bme.h"
+#include "gmod.h"
+#include "gmodplay.h"
+#include "gorder.h"
+
+extern char infoTextBuffer[256];
+extern int hexnybble;
+extern int recordmode;
+extern int autoadvance;
+extern char transportLoopPattern;
+extern char transportLoopPatternSelectArea;
+extern char songpath[MAX_PATHNAME];
+extern char ptmodsamplefilter[MAX_FILENAME];
+extern char ptmodsamplefilename[MAX_PATHNAME];
+extern char textbuffer[MAX_PATHNAME];
+
+static int ptmodSaveCurrentOrAs(GTOBJECT *gt);
+static int ptmodSaveAs(GTOBJECT *gt);
+static int ptmodConfirmDiscard(GTOBJECT *gt, const char *action);
+static void ptmodResetEditorPosition(void);
+static int ptmodOpenSampleEditor(GTOBJECT *gt);
+static int ptmodShowEffectTemplateMenu(GTOBJECT *gt, const PTMOD_PREVIEW_STATS *stats);
+static const char *ptmodFilenameFromPath(const char *path);
+static int ptmodShowSampleImportOptions(GTOBJECT *gt, const char *path,
+	PTMOD_SAMPLE_IMPORT_OPTIONS *options);
+static void ptmodDrawOpaqueBox(int x, int y, int width, int height, int color);
+
+typedef struct
+{
+	int valid;
+	int rows;
+	int channels;
+	PTMOD_CELL cell[PTMOD_ROWS][PTMOD_CHANNELS];
+} PTMOD_BLOCK_CLIPBOARD;
+
+static PTMOD_BLOCK_CLIPBOARD ptmodBlockClipboard;
 
 static void showStartupError(const char* message)
 {
 #ifdef __WIN32__
-	MessageBoxA(NULL, message, "GTUltra startup error", MB_OK | MB_ICONERROR);
+	MessageBoxA(NULL, message, "GTUltraPro startup error", MB_OK | MB_ICONERROR);
 #else
 	fprintf(stderr, "%s\n", message);
 #endif
+}
+
+static int makeSelectorPath(char *dest, size_t destSize, const char *path, const char *name)
+{
+	size_t pathLen;
+	size_t nameLen;
+	int needsSlash;
+
+	if (!dest || destSize == 0 || !name || !name[0])
+		return 0;
+
+	if (name[0] == '/' || name[0] == '\\' || (strlen(name) > 2 && name[1] == ':'))
+	{
+		if (strlen(name) >= destSize)
+			return 0;
+		strcpy(dest, name);
+		return 1;
+	}
+
+	if (!path || !path[0])
+		path = ".";
+
+	pathLen = strlen(path);
+	nameLen = strlen(name);
+	needsSlash = pathLen > 0 && path[pathLen - 1] != '/' && path[pathLen - 1] != '\\';
+	if (pathLen + (needsSlash ? 1 : 0) + nameLen >= destSize)
+		return 0;
+
+	strcpy(dest, path);
+	if (needsSlash)
+		strcat(dest, "/");
+	strcat(dest, name);
+	return 1;
+}
+
+static int ptmodEditableRowCount(void)
+{
+	PTMOD_PREVIEW_STATS stats;
+
+	ptmodplay_get_stats(&stats);
+	(void)stats;
+	if (!ptmodState.valid)
+		return 1;
+	return 4 + PTMOD_ORDER_VISIBLE_ROWS + 4 + PTMOD_MAX_PREVIEW_CHANNELS + 8;
+}
+
+#define PTMOD_SETTINGS_FIRST_EDIT_ROW 4
+#define PTMOD_SIDE_ROW_TITLE 0
+#define PTMOD_SIDE_ROW_LENGTH 1
+#define PTMOD_SIDE_ROW_RESTART 2
+#define PTMOD_SIDE_ROW_FOLLOW 3
+#define PTMOD_SIDE_ROW_ORDER_FIRST 4
+#define PTMOD_STREAM_SUBCOLUMN_COUNT 6
+
+enum
+{
+	PTMOD_STREAM_SUBCOLUMN_NOTE,
+	PTMOD_STREAM_SUBCOLUMN_SAMPLE_HI,
+	PTMOD_STREAM_SUBCOLUMN_SAMPLE_LO,
+	PTMOD_STREAM_SUBCOLUMN_EFFECT,
+	PTMOD_STREAM_SUBCOLUMN_PARAM_HI,
+	PTMOD_STREAM_SUBCOLUMN_PARAM_LO
+};
+
+static int ptmodSideRuntimeBase(void)
+{
+	return PTMOD_SIDE_ROW_ORDER_FIRST + PTMOD_ORDER_VISIBLE_ROWS;
+}
+
+static int ptmodSideChannelBase(void)
+{
+	return ptmodSideRuntimeBase() + 4;
+}
+
+static int ptmodSideSampleBase(const PTMOD_PREVIEW_STATS *stats)
+{
+	int channels = stats && stats->loaded ? stats->channels : PTMOD_MAX_PREVIEW_CHANNELS;
+
+	if (channels < 0)
+		channels = 0;
+	if (channels > PTMOD_MAX_PREVIEW_CHANNELS)
+		channels = PTMOD_MAX_PREVIEW_CHANNELS;
+	return ptmodSideChannelBase() + channels;
+}
+
+static void clampPtmodEditRow(void)
+{
+	int rows = ptmodEditableRowCount();
+
+	if (rows < 1)
+		rows = 1;
+	if (editorInfo.ptmodEditRow < 0)
+		editorInfo.ptmodEditRow = 0;
+	if (editorInfo.ptmodEditRow >= rows)
+		editorInfo.ptmodEditRow = rows - 1;
+}
+
+static int ptmodStreamChannelCount(const PTMOD_PREVIEW_STATS *stats)
+{
+	if (!stats || !stats->loaded || stats->channels <= 0)
+		return 1;
+	if (stats->channels > PTMOD_MAX_PREVIEW_CHANNELS)
+		return PTMOD_MAX_PREVIEW_CHANNELS;
+	return stats->channels;
+}
+
+static int ptmodStreamMaxRow(const PTMOD_PREVIEW_STATS *stats)
+{
+	if (!stats || !stats->loaded)
+		return 0;
+	return PTMOD_ROWS - 1;
+}
+
+static int ptmodOrderMax(const PTMOD_PREVIEW_STATS *stats)
+{
+	(void)stats;
+	if (!ptmodState.valid || ptmodState.songLength <= 0)
+		return 0;
+	return ptmodState.songLength - 1;
+}
+
+static int ptmodOrderListStart(const PTMOD_PREVIEW_STATS *stats)
+{
+	int maxOrder = ptmodOrderMax(stats);
+	int selected = editorInfo.ptmodOrderIndex;
+	int start;
+	int maxStart;
+
+	if (stats && stats->loaded && stats->active && editorInfo.ptmodStreamFollow)
+		selected = stats->orderIndex;
+	if (selected < 0)
+		selected = 0;
+	if (selected > maxOrder)
+		selected = maxOrder;
+
+	start = selected - PTMOD_ORDER_VISIBLE_ROWS / 2;
+	maxStart = maxOrder - PTMOD_ORDER_VISIBLE_ROWS + 1;
+	if (maxStart < 0)
+		maxStart = 0;
+	if (start < 0)
+		start = 0;
+	if (start > maxStart)
+		start = maxStart;
+	return start;
+}
+
+static int ptmodOrderIndexFromSideRow(const PTMOD_PREVIEW_STATS *stats, int row)
+{
+	int orderIndex;
+
+	if (!ptmodState.valid ||
+		row < PTMOD_SIDE_ROW_ORDER_FIRST ||
+		row >= PTMOD_SIDE_ROW_ORDER_FIRST + PTMOD_ORDER_VISIBLE_ROWS)
+		return -1;
+	orderIndex = ptmodOrderListStart(stats) + row - PTMOD_SIDE_ROW_ORDER_FIRST;
+	if (orderIndex < 0 || orderIndex > ptmodOrderMax(stats))
+		return -1;
+	return orderIndex;
+}
+
+static void ptmodSelectOrderFromSideRow(const PTMOD_PREVIEW_STATS *stats)
+{
+	int orderIndex = ptmodOrderIndexFromSideRow(stats, editorInfo.ptmodEditRow);
+
+	if (orderIndex >= 0)
+	{
+		editorInfo.ptmodOrderIndex = orderIndex;
+		editorInfo.ptmodStreamFollow = 0;
+	}
+}
+
+static int ptmodEditorOrderIndex(const PTMOD_PREVIEW_STATS *stats)
+{
+	int orderIndex;
+	int maxOrder = ptmodOrderMax(stats);
+
+	if (stats && stats->loaded && stats->active && editorInfo.ptmodStreamFollow)
+		orderIndex = stats->orderIndex;
+	else
+		orderIndex = editorInfo.ptmodOrderIndex;
+
+	if (orderIndex < 0)
+		orderIndex = 0;
+	if (orderIndex > maxOrder)
+		orderIndex = maxOrder;
+	return orderIndex;
+}
+
+static int ptmodStreamCursorRow(const PTMOD_PREVIEW_STATS *stats)
+{
+	if (stats && stats->loaded && stats->active && editorInfo.ptmodStreamFollow)
+		return stats->row;
+	return editorInfo.ptmodStreamRow;
+}
+
+static int ptmodFieldFromSubColumn(int subColumn)
+{
+	switch (subColumn)
+	{
+	case PTMOD_STREAM_SUBCOLUMN_NOTE:
+		return PTMOD_ROW_FIELD_PERIOD;
+	case PTMOD_STREAM_SUBCOLUMN_SAMPLE_HI:
+	case PTMOD_STREAM_SUBCOLUMN_SAMPLE_LO:
+		return PTMOD_ROW_FIELD_SAMPLE;
+	case PTMOD_STREAM_SUBCOLUMN_EFFECT:
+		return PTMOD_ROW_FIELD_EFFECT;
+	case PTMOD_STREAM_SUBCOLUMN_PARAM_HI:
+	case PTMOD_STREAM_SUBCOLUMN_PARAM_LO:
+		return PTMOD_ROW_FIELD_PARAM;
+	default:
+		return PTMOD_ROW_FIELD_PERIOD;
+	}
+}
+
+static int ptmodSubColumnFromField(int field)
+{
+	switch (field)
+	{
+	case PTMOD_ROW_FIELD_SAMPLE:
+		return PTMOD_STREAM_SUBCOLUMN_SAMPLE_HI;
+	case PTMOD_ROW_FIELD_EFFECT:
+		return PTMOD_STREAM_SUBCOLUMN_EFFECT;
+	case PTMOD_ROW_FIELD_PARAM:
+		return PTMOD_STREAM_SUBCOLUMN_PARAM_HI;
+	case PTMOD_ROW_FIELD_PERIOD:
+	default:
+		return PTMOD_STREAM_SUBCOLUMN_NOTE;
+	}
+}
+
+static void ptmodSetStreamSubColumn(int subColumn)
+{
+	if (subColumn < 0)
+		subColumn = 0;
+	if (subColumn >= PTMOD_STREAM_SUBCOLUMN_COUNT)
+		subColumn = PTMOD_STREAM_SUBCOLUMN_COUNT - 1;
+	editorInfo.ptmodStreamSubColumn = subColumn;
+	editorInfo.ptmodStreamField = ptmodFieldFromSubColumn(subColumn);
+}
+
+static void clampPtmodStreamCursor(const PTMOD_PREVIEW_STATS *stats)
+{
+	int maxRow = ptmodStreamMaxRow(stats);
+	int maxChannel = ptmodStreamChannelCount(stats) - 1;
+	int maxView = maxRow - VISIBLEPATTROWS + 1;
+	int cursorRow;
+	int fieldFromSubColumn;
+
+	if (maxView < 0)
+		maxView = 0;
+
+	if (editorInfo.ptmodStreamRow < 0)
+		editorInfo.ptmodStreamRow = 0;
+	if (editorInfo.ptmodStreamRow > maxRow)
+		editorInfo.ptmodStreamRow = maxRow;
+	if (editorInfo.ptmodStreamView < 0)
+		editorInfo.ptmodStreamView = 0;
+	if (editorInfo.ptmodStreamView > maxView)
+		editorInfo.ptmodStreamView = maxView;
+	if (editorInfo.ptmodOrderIndex < 0)
+		editorInfo.ptmodOrderIndex = 0;
+	if (editorInfo.ptmodOrderIndex > ptmodOrderMax(stats))
+		editorInfo.ptmodOrderIndex = ptmodOrderMax(stats);
+	if (editorInfo.ptmodStreamChannel < 0)
+		editorInfo.ptmodStreamChannel = 0;
+	if (editorInfo.ptmodStreamChannel > maxChannel)
+		editorInfo.ptmodStreamChannel = maxChannel;
+	if (editorInfo.ptmodStreamField < 0)
+		editorInfo.ptmodStreamField = 0;
+	if (editorInfo.ptmodStreamField >= PTMOD_ROW_FIELD_COUNT)
+		editorInfo.ptmodStreamField = PTMOD_ROW_FIELD_COUNT - 1;
+	fieldFromSubColumn = ptmodFieldFromSubColumn(editorInfo.ptmodStreamSubColumn);
+	if (editorInfo.ptmodStreamSubColumn < 0 ||
+		editorInfo.ptmodStreamSubColumn >= PTMOD_STREAM_SUBCOLUMN_COUNT ||
+		fieldFromSubColumn != editorInfo.ptmodStreamField)
+		editorInfo.ptmodStreamSubColumn = ptmodSubColumnFromField(editorInfo.ptmodStreamField);
+	editorInfo.ptmodStreamField = ptmodFieldFromSubColumn(editorInfo.ptmodStreamSubColumn);
+
+	cursorRow = ptmodStreamCursorRow(stats);
+	if (cursorRow < editorInfo.ptmodStreamView)
+		editorInfo.ptmodStreamView = cursorRow;
+	if (cursorRow >= editorInfo.ptmodStreamView + VISIBLEPATTROWS)
+		editorInfo.ptmodStreamView = cursorRow - VISIBLEPATTROWS + 1;
+}
+
+static void ptmodMoveStreamRow(const PTMOD_PREVIEW_STATS *stats, int delta)
+{
+	int maxRow = ptmodStreamMaxRow(stats);
+	int maxOrder = ptmodOrderMax(stats);
+	int orderIndex = ptmodEditorOrderIndex(stats);
+	int row = ptmodStreamCursorRow(stats);
+
+	editorInfo.ptmodEditPage = 0;
+	editorInfo.ptmodStreamFollow = 0;
+	row += delta;
+	while (row < 0 && orderIndex > 0)
+	{
+		orderIndex--;
+		row += PTMOD_ROWS;
+	}
+	while (row > maxRow && orderIndex < maxOrder)
+	{
+		orderIndex++;
+		row -= PTMOD_ROWS;
+	}
+	if (row < 0)
+		row = 0;
+	if (row > maxRow)
+		row = maxRow;
+	editorInfo.ptmodOrderIndex = orderIndex;
+	editorInfo.ptmodStreamRow = row;
+	clampPtmodStreamCursor(stats);
+}
+
+static void ptmodMoveOrder(const PTMOD_PREVIEW_STATS *stats, int delta)
+{
+	int orderIndex = ptmodEditorOrderIndex(stats) + delta;
+	int maxOrder = ptmodOrderMax(stats);
+
+	editorInfo.ptmodEditPage = 0;
+	editorInfo.ptmodStreamFollow = 0;
+	if (orderIndex < 0)
+		orderIndex = 0;
+	if (orderIndex > maxOrder)
+		orderIndex = maxOrder;
+	editorInfo.ptmodOrderIndex = orderIndex;
+	clampPtmodStreamCursor(stats);
+}
+
+static void ptmodMoveStreamColumn(const PTMOD_PREVIEW_STATS *stats, int delta)
+{
+	int channels = ptmodStreamChannelCount(stats);
+	int total = channels * PTMOD_STREAM_SUBCOLUMN_COUNT;
+	int cursor = editorInfo.ptmodStreamChannel * PTMOD_STREAM_SUBCOLUMN_COUNT +
+		editorInfo.ptmodStreamSubColumn;
+
+	editorInfo.ptmodEditPage = 0;
+	cursor += delta;
+	while (cursor < 0)
+		cursor += total;
+	while (cursor >= total)
+		cursor -= total;
+	editorInfo.ptmodStreamChannel = cursor / PTMOD_STREAM_SUBCOLUMN_COUNT;
+	ptmodSetStreamSubColumn(cursor % PTMOD_STREAM_SUBCOLUMN_COUNT);
+	clampPtmodStreamCursor(stats);
+}
+
+static int ptmodStreamFieldWidth(int field)
+{
+	switch (field)
+	{
+	case PTMOD_ROW_FIELD_SAMPLE:
+		return 2;
+	case PTMOD_ROW_FIELD_PERIOD:
+		return 4;
+	case PTMOD_ROW_FIELD_EFFECT:
+		return 1;
+	case PTMOD_ROW_FIELD_PARAM:
+		return 2;
+	default:
+		return 2;
+	}
+}
+
+static int ptmodStreamFieldValue(const PTMOD_CELL *cell, int field)
+{
+	if (!cell)
+		return 0;
+	switch (field)
+	{
+	case PTMOD_ROW_FIELD_SAMPLE:
+		return cell->sample;
+	case PTMOD_ROW_FIELD_PERIOD:
+		return cell->period;
+	case PTMOD_ROW_FIELD_EFFECT:
+		return cell->effect;
+	case PTMOD_ROW_FIELD_PARAM:
+		return cell->param;
+	default:
+		return 0;
+	}
+}
+
+static const char *ptmodStreamFieldName(int field)
+{
+	switch (field)
+	{
+	case PTMOD_ROW_FIELD_PERIOD:
+		return "note";
+	case PTMOD_ROW_FIELD_SAMPLE:
+		return "sample";
+	case PTMOD_ROW_FIELD_EFFECT:
+		return "effect";
+	case PTMOD_ROW_FIELD_PARAM:
+		return "param";
+	default:
+		return "field";
+	}
+}
+
+static int ptmodPeriodFromGtNote(int note)
+{
+	static const int protrackerPeriods[] = {
+		856, 808, 762, 720, 678, 640, 604, 570, 538, 508, 480, 453,
+		428, 404, 381, 360, 339, 320, 302, 285, 269, 254, 240, 226,
+		214, 202, 190, 180, 170, 160, 151, 143, 135, 127, 120, 113
+	};
+	int periodIndex = note - FIRSTNOTE - 12;
+
+	if (periodIndex < 0 || periodIndex >= (int)(sizeof protrackerPeriods / sizeof protrackerPeriods[0]))
+		return 0;
+	return protrackerPeriods[periodIndex];
+}
+
+static int ptmodSelectedSampleNumber(void)
+{
+	int sample = editorInfo.ptmodSampleIndex + 1;
+
+	if (sample < 1)
+		sample = 1;
+	if (sample > PTMOD_MAX_SAMPLES)
+		sample = PTMOD_MAX_SAMPLES;
+	return sample;
+}
+
+static int ptmodSelectedSampleIndex(void)
+{
+	int sampleIndex = editorInfo.ptmodSampleIndex;
+
+	if (sampleIndex < 0)
+		sampleIndex = 0;
+	if (sampleIndex >= PTMOD_MAX_SAMPLES)
+		sampleIndex = PTMOD_MAX_SAMPLES - 1;
+	editorInfo.ptmodSampleIndex = sampleIndex;
+	return sampleIndex;
+}
+
+static void ptmodSelectSampleDelta(int delta)
+{
+	int sampleIndex = editorInfo.ptmodSampleIndex + delta;
+
+	while (sampleIndex < 0)
+		sampleIndex += PTMOD_MAX_SAMPLES;
+	while (sampleIndex >= PTMOD_MAX_SAMPLES)
+		sampleIndex -= PTMOD_MAX_SAMPLES;
+	editorInfo.ptmodSampleIndex = sampleIndex;
+	snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD sample %02d selected", sampleIndex + 1);
+	forceInfoLine = 1;
+}
+
+static void ptmodChangeOctave(int delta)
+{
+	editorInfo.epoctave += delta;
+	if (editorInfo.epoctave < 0)
+		editorInfo.epoctave = 0;
+	if (editorInfo.epoctave > 6)
+		editorInfo.epoctave = 6;
+	snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD octave %d", editorInfo.epoctave);
+	forceInfoLine = 1;
+}
+
+static int ptmodHandleSampleOctaveShortcut(void)
+{
+	if (shiftOrCtrlPressed)
+		return 0;
+	switch (rawkey)
+	{
+	case KEY_MINUS:
+	case KEY_KPMINUS:
+		ptmodSelectSampleDelta(-1);
+		return 1;
+	case KEY_EQUAL:
+	case KEY_KPPLUS:
+		ptmodSelectSampleDelta(1);
+		return 1;
+	case KEY_KPMULTIPLY:
+		ptmodChangeOctave(1);
+		return 1;
+	case KEY_SLASH:
+	case KEY_KPDIVIDE:
+		ptmodChangeOctave(-1);
+		return 1;
+	default:
+		break;
+	}
+	if (key == '+')
+	{
+		ptmodSelectSampleDelta(1);
+		return 1;
+	}
+	if (key == '*')
+	{
+		ptmodChangeOctave(1);
+		return 1;
+	}
+	if (key == '/')
+	{
+		ptmodChangeOctave(-1);
+		return 1;
+	}
+	return 0;
+}
+
+static int ptmodPushUndo(const char *label)
+{
+	char error[256];
+
+	if (ptmod_undo_push(label, error, sizeof error))
+		return 1;
+	snprintf(infoTextBuffer, sizeof infoTextBuffer, "%s", error[0] ? error : "Could not capture MOD undo");
+	forceInfoLine = 1;
+	return 0;
+}
+
+static void ptmodCancelUndo(void)
+{
+	ptmod_undo_cancel_last();
+}
+
+static void ptmodShowEffectInfo(int effect, int param)
+{
+	char help[96];
+
+	ptmod_format_effect_help(effect, param, help, sizeof help);
+	snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD effect %s", help);
+	forceInfoLine = 1;
+}
+
+static void ptmodToggleFollowNow(const PTMOD_PREVIEW_STATS *stats)
+{
+	editorInfo.ptmodEditPage = 0;
+	editorInfo.ptmodStreamFollow = !editorInfo.ptmodStreamFollow;
+	if (editorInfo.ptmodStreamFollow && stats && stats->active)
+	{
+		editorInfo.ptmodOrderIndex = stats->orderIndex;
+		editorInfo.ptmodStreamRow = stats->row;
+	}
+	clampPtmodStreamCursor(stats);
+	snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD follow/scroll %s",
+		editorInfo.ptmodStreamFollow ? "on" : "off");
+	forceInfoLine = 1;
+}
+
+static int ptmodToggleFollow(const PTMOD_PREVIEW_STATS *stats)
+{
+	if (rawkey != KEY_F || !ctrlpressed)
+		return 0;
+
+	ptmodToggleFollowNow(stats);
+	return 1;
+}
+
+static int ptmodEditNoteKey(const PTMOD_PREVIEW_STATS *stats)
+{
+	int note;
+	int period;
+	int cursorRow;
+	int orderIndex;
+	int pattern;
+	int sample;
+
+	if (editorInfo.ptmodEditPage != 0 || editorInfo.ptmodStreamField != PTMOD_ROW_FIELD_PERIOD ||
+		!stats || !stats->loaded || !rawkey || shiftOrCtrlPressed)
+		return 0;
+
+	note = getNote(rawkey);
+	if (note < FIRSTNOTE || note > LASTNOTE)
+		return 0;
+
+	period = ptmodPeriodFromGtNote(note);
+	if (!period)
+	{
+		snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD notes are C-1..B-3; change octave");
+		forceInfoLine = 1;
+		return 1;
+	}
+	if (!recordmode)
+	{
+		snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD record mode is off");
+		forceInfoLine = 1;
+		return 1;
+	}
+
+	clampPtmodStreamCursor(stats);
+	cursorRow = ptmodStreamCursorRow(stats);
+	orderIndex = ptmodEditorOrderIndex(stats);
+	pattern = ptmod_order_pattern(orderIndex);
+	sample = ptmodSelectedSampleNumber();
+	if (!ptmodPushUndo("pattern note"))
+		return 1;
+	if (!ptmod_set_pattern_cell_note(pattern, cursorRow, editorInfo.ptmodStreamChannel, period, sample))
+		return 0;
+
+	editorInfo.ptmodEditPage = 0;
+	editorInfo.ptmodStreamFollow = 0;
+	editorInfo.ptmodOrderIndex = orderIndex;
+	ptmodSetStreamSubColumn(PTMOD_STREAM_SUBCOLUMN_NOTE);
+	snprintf(infoTextBuffer, sizeof infoTextBuffer,
+		"MOD ord %02d pat %02X row %02X ch%d note period=%03X sample=%02X",
+		orderIndex, pattern, cursorRow, editorInfo.ptmodStreamChannel + 1,
+		period, sample);
+	forceInfoLine = 1;
+	if (autoadvance < 2)
+		ptmodMoveStreamRow(stats, 1);
+	return 1;
+}
+
+static int ptmodEditStreamHex(const PTMOD_PREVIEW_STATS *stats)
+{
+	PTMOD_CELL cell;
+	int cursorRow;
+	int orderIndex;
+	int pattern;
+	int oldValue;
+	int width;
+	int subColumn;
+	int newValue;
+
+	if (editorInfo.ptmodEditPage != 0 || editorInfo.ptmodStreamField == PTMOD_ROW_FIELD_PERIOD ||
+		!stats || !stats->loaded || hexnybble < 0 || shiftOrCtrlPressed)
+		return 0;
+
+	clampPtmodStreamCursor(stats);
+	cursorRow = ptmodStreamCursorRow(stats);
+	orderIndex = ptmodEditorOrderIndex(stats);
+	pattern = ptmod_order_pattern(orderIndex);
+	if (!ptmod_get_pattern_cell(pattern, cursorRow, editorInfo.ptmodStreamChannel, &cell))
+		return 0;
+
+	width = ptmodStreamFieldWidth(editorInfo.ptmodStreamField);
+	oldValue = ptmodStreamFieldValue(&cell, editorInfo.ptmodStreamField);
+	subColumn = editorInfo.ptmodStreamSubColumn;
+	if (subColumn == PTMOD_STREAM_SUBCOLUMN_SAMPLE_HI ||
+		subColumn == PTMOD_STREAM_SUBCOLUMN_PARAM_HI)
+		newValue = (oldValue & 0x0f) | ((hexnybble & 0x0f) << 4);
+	else if (subColumn == PTMOD_STREAM_SUBCOLUMN_SAMPLE_LO ||
+		subColumn == PTMOD_STREAM_SUBCOLUMN_PARAM_LO)
+		newValue = (oldValue & 0xf0) | (hexnybble & 0x0f);
+	else if (editorInfo.ptmodStreamField == PTMOD_ROW_FIELD_EFFECT)
+		newValue = hexnybble & 0x0f;
+	else
+		newValue = ((oldValue << 4) | hexnybble) & 0xff;
+	if (newValue == oldValue)
+		return 1;
+	if (!ptmodPushUndo("pattern field"))
+		return 1;
+	if (!ptmod_set_pattern_cell_value(pattern, cursorRow, editorInfo.ptmodStreamChannel,
+		editorInfo.ptmodStreamField, newValue))
+	{
+		ptmodCancelUndo();
+		return 1;
+	}
+	ptmod_get_pattern_cell(pattern, cursorRow, editorInfo.ptmodStreamChannel, &cell);
+	newValue = ptmodStreamFieldValue(&cell, editorInfo.ptmodStreamField);
+
+	editorInfo.ptmodEditPage = 0;
+	editorInfo.ptmodStreamFollow = 0;
+	editorInfo.ptmodOrderIndex = orderIndex;
+	if (editorInfo.ptmodStreamField == PTMOD_ROW_FIELD_EFFECT ||
+		editorInfo.ptmodStreamField == PTMOD_ROW_FIELD_PARAM)
+	{
+		ptmodShowEffectInfo(cell.effect, cell.param);
+	}
+	else
+	{
+		snprintf(infoTextBuffer, sizeof infoTextBuffer,
+			"MOD ord %02d pat %02X row %02X ch%d %s=%0*X",
+			orderIndex, pattern, cursorRow, editorInfo.ptmodStreamChannel + 1,
+			ptmodStreamFieldName(editorInfo.ptmodStreamField),
+			width, newValue);
+		forceInfoLine = 1;
+	}
+	return 1;
+}
+
+static int ptmodClearStreamField(const PTMOD_PREVIEW_STATS *stats)
+{
+	int cursorRow;
+	int orderIndex;
+	int pattern;
+
+	if (editorInfo.ptmodEditPage != 0 || !stats || !stats->loaded)
+		return 0;
+
+	clampPtmodStreamCursor(stats);
+	cursorRow = ptmodStreamCursorRow(stats);
+	orderIndex = ptmodEditorOrderIndex(stats);
+	pattern = ptmod_order_pattern(orderIndex);
+	if (!ptmodPushUndo("pattern clear"))
+		return 1;
+	if (!ptmod_set_pattern_cell_value(pattern, cursorRow, editorInfo.ptmodStreamChannel,
+		editorInfo.ptmodStreamField, 0))
+		return 0;
+
+	editorInfo.ptmodEditPage = 0;
+	editorInfo.ptmodStreamFollow = 0;
+	editorInfo.ptmodOrderIndex = orderIndex;
+	snprintf(infoTextBuffer, sizeof infoTextBuffer,
+		"MOD ord %02d pat %02X row %02X ch%d %s cleared",
+		orderIndex, pattern, cursorRow, editorInfo.ptmodStreamChannel + 1,
+		ptmodStreamFieldName(editorInfo.ptmodStreamField));
+	forceInfoLine = 1;
+	return 1;
+}
+
+static void ptmodCurrentPatternCursor(const PTMOD_PREVIEW_STATS *stats,
+	int *orderIndex, int *pattern, int *row, int *channel)
+{
+	int localOrder = ptmodEditorOrderIndex(stats);
+	int localPattern = ptmod_order_pattern(localOrder);
+	int localRow = ptmodStreamCursorRow(stats);
+	int localChannel = editorInfo.ptmodStreamChannel;
+
+	if (localRow < 0)
+		localRow = 0;
+	if (localRow >= PTMOD_ROWS)
+		localRow = PTMOD_ROWS - 1;
+	if (localChannel < 0)
+		localChannel = 0;
+	if (localChannel >= PTMOD_CHANNELS)
+		localChannel = PTMOD_CHANNELS - 1;
+	if (orderIndex)
+		*orderIndex = localOrder;
+	if (pattern)
+		*pattern = localPattern;
+	if (row)
+		*row = localRow;
+	if (channel)
+		*channel = localChannel;
+}
+
+static int ptmodNormalizeBlockBounds(int *rowStart, int *rowEnd, int *channelStart, int *channelEnd)
+{
+	if (!editorInfo.ptmodBlockActive)
+		return 0;
+	*rowStart = editorInfo.ptmodBlockRowStart;
+	*rowEnd = editorInfo.ptmodBlockRowEnd;
+	*channelStart = editorInfo.ptmodBlockChannelStart;
+	*channelEnd = editorInfo.ptmodBlockChannelEnd;
+	if (*rowStart > *rowEnd)
+	{
+		int temp = *rowStart;
+		*rowStart = *rowEnd;
+		*rowEnd = temp;
+	}
+	if (*channelStart > *channelEnd)
+	{
+		int temp = *channelStart;
+		*channelStart = *channelEnd;
+		*channelEnd = temp;
+	}
+	if (*rowStart < 0)
+		*rowStart = 0;
+	if (*rowEnd >= PTMOD_ROWS)
+		*rowEnd = PTMOD_ROWS - 1;
+	if (*channelStart < 0)
+		*channelStart = 0;
+	if (*channelEnd >= PTMOD_CHANNELS)
+		*channelEnd = PTMOD_CHANNELS - 1;
+	return *rowStart <= *rowEnd && *channelStart <= *channelEnd;
+}
+
+static int ptmodBlockBoundsForPattern(int pattern, int *rowStart, int *rowEnd, int *channelStart, int *channelEnd)
+{
+	if (pattern < 0 || editorInfo.ptmodBlockPattern != pattern)
+		return 0;
+	return ptmodNormalizeBlockBounds(rowStart, rowEnd, channelStart, channelEnd);
+}
+
+static void ptmodSetBlockMark(int orderIndex, int pattern, int row, int channel, int wholePattern)
+{
+	if (wholePattern)
+	{
+		editorInfo.ptmodBlockActive = 1;
+		editorInfo.ptmodBlockOrder = orderIndex;
+		editorInfo.ptmodBlockPattern = pattern;
+		editorInfo.ptmodBlockRowStart = 0;
+		editorInfo.ptmodBlockRowEnd = PTMOD_ROWS - 1;
+		editorInfo.ptmodBlockChannelStart = 0;
+		editorInfo.ptmodBlockChannelEnd = PTMOD_CHANNELS - 1;
+		snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD pattern %02X marked", pattern);
+	}
+	else if (!editorInfo.ptmodBlockActive || editorInfo.ptmodBlockPattern != pattern)
+	{
+		editorInfo.ptmodBlockActive = 1;
+		editorInfo.ptmodBlockOrder = orderIndex;
+		editorInfo.ptmodBlockPattern = pattern;
+		editorInfo.ptmodBlockRowStart = row;
+		editorInfo.ptmodBlockRowEnd = row;
+		editorInfo.ptmodBlockChannelStart = channel;
+		editorInfo.ptmodBlockChannelEnd = channel;
+		snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD block anchor row %02X ch%d", row, channel + 1);
+	}
+	else
+	{
+		editorInfo.ptmodBlockOrder = orderIndex;
+		editorInfo.ptmodBlockPattern = pattern;
+		editorInfo.ptmodBlockRowEnd = row;
+		editorInfo.ptmodBlockChannelEnd = channel;
+		snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD block marked to row %02X ch%d", row, channel + 1);
+	}
+	forceInfoLine = 1;
+}
+
+static void ptmodFillBlockClipboard(int pattern, int rowStart, int rowEnd, int channelStart, int channelEnd)
+{
+	int row;
+	int channel;
+
+	memset(&ptmodBlockClipboard, 0, sizeof ptmodBlockClipboard);
+	ptmodBlockClipboard.valid = 1;
+	ptmodBlockClipboard.rows = rowEnd - rowStart + 1;
+	ptmodBlockClipboard.channels = channelEnd - channelStart + 1;
+	for (row = 0; row < ptmodBlockClipboard.rows; row++)
+	{
+		for (channel = 0; channel < ptmodBlockClipboard.channels; channel++)
+			ptmod_get_pattern_cell(pattern, rowStart + row, channelStart + channel,
+				&ptmodBlockClipboard.cell[row][channel]);
+	}
+}
+
+static int ptmodCopyBlock(int pattern)
+{
+	int rowStart;
+	int rowEnd;
+	int channelStart;
+	int channelEnd;
+
+	if (!ptmodBlockBoundsForPattern(pattern, &rowStart, &rowEnd, &channelStart, &channelEnd))
+	{
+		snprintf(infoTextBuffer, sizeof infoTextBuffer, "No MOD block is marked in this pattern");
+		forceInfoLine = 1;
+		return 1;
+	}
+
+	ptmodFillBlockClipboard(pattern, rowStart, rowEnd, channelStart, channelEnd);
+	snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD block copied %dx%d",
+		ptmodBlockClipboard.rows, ptmodBlockClipboard.channels);
+	forceInfoLine = 1;
+	return 1;
+}
+
+static int ptmodCutBlock(int pattern)
+{
+	int rowStart;
+	int rowEnd;
+	int channelStart;
+	int channelEnd;
+	int row;
+	int channel;
+
+	if (!ptmodBlockBoundsForPattern(pattern, &rowStart, &rowEnd, &channelStart, &channelEnd))
+	{
+		snprintf(infoTextBuffer, sizeof infoTextBuffer, "No MOD block is marked in this pattern");
+		forceInfoLine = 1;
+		return 1;
+	}
+	ptmodFillBlockClipboard(pattern, rowStart, rowEnd, channelStart, channelEnd);
+	if (!ptmodPushUndo("block cut"))
+		return 1;
+	for (row = rowStart; row <= rowEnd; row++)
+	{
+		for (channel = channelStart; channel <= channelEnd; channel++)
+			memset(&ptmodState.pattern[pattern][row][channel], 0,
+				sizeof ptmodState.pattern[pattern][row][channel]);
+	}
+	ptmodState.dirty = 1;
+	ptmodplay_reload_if_dirty();
+	snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD block cut");
+	forceInfoLine = 1;
+	return 1;
+}
+
+static int ptmodPasteBlock(int pattern, int rowStart, int channelStart)
+{
+	int row;
+	int channel;
+
+	if (!ptmodBlockClipboard.valid)
+	{
+		snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD block clipboard is empty");
+		forceInfoLine = 1;
+		return 1;
+	}
+	if (pattern < 0 || rowStart < 0 || rowStart >= PTMOD_ROWS ||
+		channelStart < 0 || channelStart >= PTMOD_CHANNELS)
+		return 0;
+	if (!ptmodPushUndo("block paste"))
+		return 1;
+	for (row = 0; row < ptmodBlockClipboard.rows && rowStart + row < PTMOD_ROWS; row++)
+	{
+		for (channel = 0; channel < ptmodBlockClipboard.channels &&
+			channelStart + channel < PTMOD_CHANNELS; channel++)
+		{
+			ptmodState.pattern[pattern][rowStart + row][channelStart + channel] =
+				ptmodBlockClipboard.cell[row][channel];
+		}
+	}
+	ptmodState.dirty = 1;
+	ptmodplay_reload_if_dirty();
+	snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD block pasted at row %02X ch%d",
+		rowStart, channelStart + 1);
+	forceInfoLine = 1;
+	return 1;
+}
+
+static int ptmodCloneCurrentPattern(int orderIndex, int pattern)
+{
+	int destPattern;
+
+	if (pattern < 0)
+		return 0;
+	destPattern = ptmodState.patternCount;
+	if (destPattern >= PTMOD_MAX_PATTERNS)
+	{
+		snprintf(infoTextBuffer, sizeof infoTextBuffer, "No free MOD pattern slot");
+		forceInfoLine = 1;
+		return 1;
+	}
+	if (!ptmodPushUndo("pattern clone"))
+		return 1;
+	if (ptmod_clone_pattern(pattern, destPattern) && ptmod_set_order_pattern(orderIndex, destPattern))
+	{
+		editorInfo.ptmodOrderIndex = orderIndex;
+		editorInfo.ptmodBlockActive = 0;
+		snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD pattern %02X cloned to %02X", pattern, destPattern);
+		forceInfoLine = 1;
+		return 1;
+	}
+	snprintf(infoTextBuffer, sizeof infoTextBuffer, "Could not clone MOD pattern");
+	forceInfoLine = 1;
+	return 1;
+}
+
+static int ptmodHandlePatternToolKey(const PTMOD_PREVIEW_STATS *stats)
+{
+	int orderIndex;
+	int pattern;
+	int row;
+	int channel;
+	int rowStart;
+	int rowEnd;
+	int channelStart;
+	int channelEnd;
+
+	if (editorInfo.ptmodEditPage != 0 || !ptmodState.valid || !stats || !stats->loaded)
+		return 0;
+	ptmodCurrentPatternCursor(stats, &orderIndex, &pattern, &row, &channel);
+	if (pattern < 0)
+		return 0;
+
+	if (ctrlpressed && rawkey == KEY_M)
+	{
+		editorInfo.ptmodScopeView = !editorInfo.ptmodScopeView;
+		snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD scopes/meters %s",
+			editorInfo.ptmodScopeView ? "on" : "off");
+		forceInfoLine = 1;
+		return 1;
+	}
+	if (ctrlpressed && rawkey == KEY_A)
+	{
+		ptmodSetBlockMark(orderIndex, pattern, row, channel, 1);
+		return 1;
+	}
+	if (ctrlpressed && rawkey == KEY_B)
+	{
+		ptmodSetBlockMark(orderIndex, pattern, row, channel, 0);
+		return 1;
+	}
+	if (ctrlpressed && rawkey == KEY_C)
+		return ptmodCopyBlock(pattern);
+	if (ctrlpressed && rawkey == KEY_X)
+		return ptmodCutBlock(pattern);
+	if (ctrlpressed && rawkey == KEY_V)
+		return ptmodPasteBlock(pattern, row, channel);
+	if (ctrlpressed && rawkey == KEY_T)
+	{
+		if (editorInfo.ptmodBlockPattern != pattern ||
+			!ptmodNormalizeBlockBounds(&rowStart, &rowEnd, &channelStart, &channelEnd))
+		{
+			rowStart = rowEnd = row;
+			channelStart = channelEnd = channel;
+		}
+		if (!ptmodPushUndo("block transpose"))
+			return 1;
+		if (ptmod_transpose_pattern_block(pattern, rowStart, rowEnd, channelStart, channelEnd,
+			shiftpressed ? -1 : 1))
+			snprintf(infoTextBuffer, sizeof infoTextBuffer, "%s", ptmod_status_text());
+		else
+			snprintf(infoTextBuffer, sizeof infoTextBuffer, "No MOD notes to transpose");
+		forceInfoLine = 1;
+		return 1;
+	}
+	if (ctrlpressed && rawkey == KEY_INS)
+	{
+		if (!ptmodPushUndo("row insert"))
+			return 1;
+		if (ptmod_insert_pattern_row(pattern, row))
+			snprintf(infoTextBuffer, sizeof infoTextBuffer, "%s", ptmod_status_text());
+		else
+			snprintf(infoTextBuffer, sizeof infoTextBuffer, "Could not insert MOD row");
+		forceInfoLine = 1;
+		return 1;
+	}
+	if (ctrlpressed && rawkey == KEY_DEL)
+	{
+		if (!ptmodPushUndo("row delete"))
+			return 1;
+		if (ptmod_delete_pattern_row(pattern, row))
+			snprintf(infoTextBuffer, sizeof infoTextBuffer, "%s", ptmod_status_text());
+		else
+			snprintf(infoTextBuffer, sizeof infoTextBuffer, "Could not delete MOD row");
+		forceInfoLine = 1;
+		return 1;
+	}
+	if (ctrlpressed && rawkey == KEY_P)
+	{
+		if (shiftpressed)
+		{
+			if (!ptmodPushUndo("pattern clear"))
+				return 1;
+			if (ptmod_clear_pattern(pattern))
+				snprintf(infoTextBuffer, sizeof infoTextBuffer, "%s", ptmod_status_text());
+			else
+				snprintf(infoTextBuffer, sizeof infoTextBuffer, "Could not clear MOD pattern");
+			editorInfo.ptmodBlockActive = 0;
+			forceInfoLine = 1;
+			return 1;
+		}
+		return ptmodCloneCurrentPattern(orderIndex, pattern);
+	}
+
+	return 0;
+}
+
+static int ptmodCurrentOrderAndRow(const PTMOD_PREVIEW_STATS *stats, int startOfPattern,
+	int *orderIndex, int *row)
+{
+	int localOrder;
+	int localRow;
+
+	if (!stats || !stats->loaded || !ptmodState.valid)
+		return 0;
+	if (editorInfo.ptmodEditPage == 1)
+	{
+		localOrder = ptmodOrderIndexFromSideRow(stats, editorInfo.ptmodEditRow);
+		if (localOrder < 0)
+			localOrder = ptmodEditorOrderIndex(stats);
+		localRow = 0;
+	}
+	else
+	{
+		localOrder = ptmodEditorOrderIndex(stats);
+		localRow = startOfPattern ? 0 : ptmodStreamCursorRow(stats);
+	}
+	if (localRow < 0)
+		localRow = 0;
+	if (localRow >= PTMOD_ROWS)
+		localRow = PTMOD_ROWS - 1;
+	if (orderIndex)
+		*orderIndex = localOrder;
+	if (row)
+		*row = localRow;
+	return 1;
+}
+
+static int ptmodPlayFromCursor(GTOBJECT *gt, int startOfPattern)
+{
+	PTMOD_PREVIEW_STATS stats;
+	int orderIndex;
+	int row;
+
+	ptmodplay_get_stats(&stats);
+	if (!ptmodCurrentOrderAndRow(&stats, startOfPattern, &orderIndex, &row))
+		return 0;
+	editorInfo.ptmodOrderIndex = orderIndex;
+	editorInfo.ptmodStreamRow = row;
+	editorInfo.ptmodStreamFollow = 0;
+	orderPlayFromPosition(gt, row * 4, orderIndex, editorInfo.eschn, 1);
+	snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD/SID play order %02d row %02X", orderIndex, row);
+	forceInfoLine = 1;
+	return 1;
+}
+
+static int ptmodToggleSelectedLoopFromMod(GTOBJECT *gt)
+{
+	PTMOD_PREVIEW_STATS stats;
+	int rowStart;
+	int rowEnd;
+	int channelStart;
+	int channelEnd;
+	int orderIndex;
+
+	if (transportLoopPatternSelectArea)
+	{
+		transportLoopPatternSelectArea = 0;
+		ptmodplay_set_loop_range(0, 0, 0, 0, 0);
+		snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD selected pattern area looping: Disabled");
+		forceInfoLine = 1;
+		return 1;
+	}
+
+	ptmodplay_get_stats(&stats);
+	if (!ptmodState.valid || !stats.loaded || !editorInfo.ptmodBlockActive ||
+		!ptmodNormalizeBlockBounds(&rowStart, &rowEnd, &channelStart, &channelEnd))
+	{
+		snprintf(infoTextBuffer, sizeof infoTextBuffer, "Mark a MOD block first (Ctrl+click or Ctrl+B)");
+		forceInfoLine = 1;
+		return 1;
+	}
+	(void)channelStart;
+	(void)channelEnd;
+
+	orderIndex = editorInfo.ptmodBlockOrder;
+	if (orderIndex < 0)
+		orderIndex = ptmodEditorOrderIndex(&stats);
+	if (orderIndex >= ptmodState.songLength)
+		orderIndex = ptmodState.songLength - 1;
+	if (orderIndex < 0)
+		orderIndex = 0;
+
+	transportLoopPattern = 1;
+	transportLoopPatternSelectArea = 1;
+	editorInfo.ptmodOrderIndex = orderIndex;
+	editorInfo.ptmodStreamRow = rowStart;
+	editorInfo.ptmodStreamFollow = 0;
+	editorInfo.epmarkchn = editorInfo.eschn;
+	editorInfo.epmarkstart = rowStart;
+	editorInfo.epmarkend = rowEnd;
+	editorInfo.highlightLoopStart = rowStart;
+	editorInfo.highlightLoopEnd = rowEnd;
+	editorInfo.highlightLoopPatternNumber = ptmod_order_pattern(orderIndex);
+	editorInfo.highlightLoopChannel = getActualChannel(editorInfo.esnum, editorInfo.epmarkchn);
+	ptmodplay_set_loop_range(1, orderIndex, rowStart, orderIndex, rowEnd);
+	orderPlayFromPosition(gt, rowStart * 4, orderIndex, editorInfo.eschn, 1);
+	snprintf(infoTextBuffer, sizeof infoTextBuffer,
+		"MOD/SID selected loop order %02d rows %02X-%02X", orderIndex, rowStart, rowEnd);
+	forceInfoLine = 1;
+	return 1;
+}
+
+static int ptmodEditSideHex(const PTMOD_PREVIEW_STATS *stats)
+{
+	int orderIndex;
+	int oldPattern;
+	int newPattern;
+
+	if (editorInfo.ptmodEditPage != 1 || !ptmodState.valid ||
+		hexnybble < 0 || shiftOrCtrlPressed)
+		return 0;
+
+	orderIndex = ptmodOrderIndexFromSideRow(stats, editorInfo.ptmodEditRow);
+	if (orderIndex < 0)
+		return 0;
+
+	oldPattern = ptmod_order_pattern(orderIndex);
+	if (oldPattern < 0)
+		oldPattern = 0;
+	newPattern = ((oldPattern << 4) | hexnybble) & 0x7f;
+	if (newPattern == oldPattern)
+		return 1;
+	if (!ptmodPushUndo("order pattern"))
+		return 1;
+	if (!ptmod_set_order_pattern(orderIndex, newPattern))
+		return 0;
+
+	editorInfo.ptmodOrderIndex = orderIndex;
+	editorInfo.ptmodStreamFollow = 0;
+	snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD order %02d pattern %02X", orderIndex, newPattern);
+	forceInfoLine = 1;
+	return 1;
+}
+
+static int ptmodHandleRuntimeKey(const PTMOD_PREVIEW_STATS *stats, const PTMOD_RUNTIME_SETTINGS *runtimeSettings)
+{
+	int runtimeFocus = editorInfo.ptmodEditPage == 1;
+	int step;
+	int channel;
+	int sampleRowBase;
+	int sampleIndex;
+	int runtimeBase = ptmodSideRuntimeBase();
+	int channelBase = ptmodSideChannelBase();
+	int orderIndex;
+	int pattern;
+
+	switch (rawkey)
+	{
+	case KEY_UP:
+		if (!runtimeFocus && !shiftpressed)
+			return 0;
+		editorInfo.ptmodEditPage = 1;
+		editorInfo.ptmodEditRow--;
+		clampPtmodEditRow();
+		ptmodSelectOrderFromSideRow(stats);
+		return 1;
+	case KEY_DOWN:
+		if (!runtimeFocus && !shiftpressed)
+			return 0;
+		editorInfo.ptmodEditPage = 1;
+		editorInfo.ptmodEditRow++;
+		clampPtmodEditRow();
+		ptmodSelectOrderFromSideRow(stats);
+		return 1;
+	case KEY_HOME:
+		if (!runtimeFocus && !shiftpressed)
+			return 0;
+		editorInfo.ptmodEditPage = 1;
+		editorInfo.ptmodEditRow = 0;
+		return 1;
+	case KEY_END:
+		if (!runtimeFocus && !shiftpressed)
+			return 0;
+		editorInfo.ptmodEditPage = 1;
+		editorInfo.ptmodEditRow = ptmodEditableRowCount() - 1;
+		clampPtmodEditRow();
+		return 1;
+	case KEY_INS:
+		if (!runtimeFocus || !ptmodState.valid)
+			return 0;
+		orderIndex = ptmodOrderIndexFromSideRow(stats, editorInfo.ptmodEditRow);
+		if (orderIndex < 0)
+			return 0;
+		if (!ptmodPushUndo("order insert"))
+			return 1;
+		if (ptmod_insert_order(orderIndex))
+		{
+			editorInfo.ptmodOrderIndex = orderIndex;
+			editorInfo.ptmodStreamFollow = 0;
+			snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD order %02d inserted", orderIndex);
+			forceInfoLine = 1;
+			return 1;
+		}
+		return 0;
+	case KEY_BACKSPACE:
+	case KEY_DEL:
+		if (!runtimeFocus || !ptmodState.valid)
+			return 0;
+		orderIndex = ptmodOrderIndexFromSideRow(stats, editorInfo.ptmodEditRow);
+		if (orderIndex < 0)
+			return 0;
+		if (!ptmodPushUndo("order delete"))
+			return 1;
+		if (ptmod_delete_order(orderIndex))
+		{
+			if (editorInfo.ptmodOrderIndex >= ptmodState.songLength)
+				editorInfo.ptmodOrderIndex = ptmodState.songLength - 1;
+			if (editorInfo.ptmodOrderIndex < 0)
+				editorInfo.ptmodOrderIndex = 0;
+			editorInfo.ptmodStreamFollow = 0;
+			snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD order %02d deleted", orderIndex);
+			forceInfoLine = 1;
+			return 1;
+		}
+		return 0;
+	case KEY_ENTER:
+	case KEY_SPACE:
+		orderIndex = ptmodOrderIndexFromSideRow(stats, editorInfo.ptmodEditRow);
+		if (orderIndex >= 0)
+		{
+			editorInfo.ptmodOrderIndex = orderIndex;
+			editorInfo.ptmodEditPage = 0;
+			editorInfo.ptmodStreamFollow = 0;
+			clampPtmodStreamCursor(stats);
+			snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD order %02d selected", orderIndex);
+			forceInfoLine = 1;
+			return 1;
+		}
+		if (editorInfo.ptmodEditRow == PTMOD_SIDE_ROW_FOLLOW)
+		{
+			ptmodToggleFollowNow(stats);
+			return 1;
+		}
+		if (editorInfo.ptmodEditRow == runtimeBase)
+		{
+			ptmodplay_set_enabled(!runtimeSettings->enabled);
+			snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD preview %s", runtimeSettings->enabled ? "off" : "on");
+			forceInfoLine = 1;
+			return 1;
+		}
+		if (editorInfo.ptmodEditRow == runtimeBase + 1)
+		{
+			int mode = runtimeSettings->replayMode == PTMOD_REPLAY_THC_WAVEFORM ?
+				PTMOD_REPLAY_LIBXMP : PTMOD_REPLAY_THC_WAVEFORM;
+			ptmodplay_set_replay_mode(mode);
+			snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD replay %s", ptmodplay_replay_mode_name(mode));
+			forceInfoLine = 1;
+			return 1;
+		}
+		if (stats && editorInfo.ptmodEditRow >= channelBase && editorInfo.ptmodEditRow < channelBase + stats->channels)
+		{
+			channel = editorInfo.ptmodEditRow - channelBase;
+			ptmodplay_set_channel_mute(channel, !runtimeSettings->channelMute[channel]);
+			snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD channel %d mute %s", channel + 1,
+				runtimeSettings->channelMute[channel] ? "off" : "on");
+			forceInfoLine = 1;
+			return 1;
+		}
+		return 0;
+	case KEY_LEFT:
+	case KEY_RIGHT:
+		if (!runtimeFocus && !shiftpressed)
+			return 0;
+		editorInfo.ptmodEditPage = 1;
+		step = ctrlpressed || (runtimeFocus && shiftpressed) ? 10 : 1;
+		if (rawkey == KEY_LEFT)
+			step = -step;
+		if (editorInfo.ptmodEditRow == PTMOD_SIDE_ROW_LENGTH)
+		{
+			if (!ptmodPushUndo("song length"))
+				return 1;
+			ptmod_set_song_length(ptmodState.songLength + step);
+			if (editorInfo.ptmodOrderIndex >= ptmodState.songLength)
+				editorInfo.ptmodOrderIndex = ptmodState.songLength - 1;
+			snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD song length %d", ptmodState.songLength);
+			forceInfoLine = 1;
+			return 1;
+		}
+		if (editorInfo.ptmodEditRow == PTMOD_SIDE_ROW_RESTART)
+		{
+			if (!ptmodPushUndo("restart"))
+				return 1;
+			ptmod_set_restart_position(ptmodState.restartPosition + step);
+			snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD restart order %02d", ptmodState.restartPosition);
+			forceInfoLine = 1;
+			return 1;
+		}
+		orderIndex = ptmodOrderIndexFromSideRow(stats, editorInfo.ptmodEditRow);
+		if (orderIndex >= 0)
+		{
+			pattern = ptmod_order_pattern(orderIndex);
+			if (pattern < 0)
+				pattern = 0;
+			pattern += step;
+			if (pattern < 0)
+				pattern = 0;
+			if (pattern >= PTMOD_MAX_PATTERNS)
+				pattern = PTMOD_MAX_PATTERNS - 1;
+			if (pattern == ptmod_order_pattern(orderIndex))
+				return 1;
+			if (!ptmodPushUndo("order pattern"))
+				return 1;
+			if (!ptmod_set_order_pattern(orderIndex, pattern))
+				return 0;
+			editorInfo.ptmodOrderIndex = orderIndex;
+			editorInfo.ptmodStreamFollow = 0;
+			snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD order %02d pattern %02X", orderIndex, pattern);
+			forceInfoLine = 1;
+			return 1;
+		}
+		if (editorInfo.ptmodEditRow == runtimeBase + 1)
+		{
+			int mode = runtimeSettings->replayMode == PTMOD_REPLAY_THC_WAVEFORM ?
+				PTMOD_REPLAY_LIBXMP : PTMOD_REPLAY_THC_WAVEFORM;
+			ptmodplay_set_replay_mode(mode);
+			snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD replay %s", ptmodplay_replay_mode_name(mode));
+			forceInfoLine = 1;
+			return 1;
+		}
+		if (editorInfo.ptmodEditRow == runtimeBase + 2)
+		{
+			ptmodplay_set_master_volume(runtimeSettings->masterVolume + step * 5);
+		}
+		else if (editorInfo.ptmodEditRow == runtimeBase + 3)
+		{
+			ptmodplay_set_start_delay(runtimeSettings->startDelayFrames + step);
+		}
+		else if (stats && editorInfo.ptmodEditRow >= channelBase && editorInfo.ptmodEditRow < channelBase + stats->channels)
+		{
+			channel = editorInfo.ptmodEditRow - channelBase;
+			if (channel < 0 || channel >= stats->channels || channel >= PTMOD_MAX_PREVIEW_CHANNELS)
+				return 0;
+			ptmodplay_set_channel_volume(channel, runtimeSettings->channelVolume[channel] + step * 5);
+		}
+		else if (ptmodState.valid)
+		{
+			PTMOD_SAMPLE sample;
+
+			sampleRowBase = ptmodSideSampleBase(stats);
+			sampleIndex = editorInfo.ptmodSampleIndex;
+			if (sampleIndex < 0)
+				sampleIndex = 0;
+			if (sampleIndex >= PTMOD_MAX_SAMPLES)
+				sampleIndex = PTMOD_MAX_SAMPLES - 1;
+
+			if (editorInfo.ptmodEditRow == sampleRowBase)
+			{
+				editorInfo.ptmodSampleIndex = sampleIndex + step;
+				if (editorInfo.ptmodSampleIndex < 0)
+					editorInfo.ptmodSampleIndex = 0;
+				if (editorInfo.ptmodSampleIndex >= PTMOD_MAX_SAMPLES)
+					editorInfo.ptmodSampleIndex = PTMOD_MAX_SAMPLES - 1;
+			}
+			else if (ptmod_get_sample(sampleIndex, &sample))
+			{
+				switch (editorInfo.ptmodEditRow - sampleRowBase)
+				{
+				case 2:
+				case 3:
+				case 4:
+				case 5:
+					if (!ptmodPushUndo("sample setting"))
+						return 1;
+					if (editorInfo.ptmodEditRow - sampleRowBase == 2)
+						ptmod_set_sample_value(sampleIndex, PTMOD_SAMPLE_FIELD_FINETUNE, sample.finetune + step);
+					else if (editorInfo.ptmodEditRow - sampleRowBase == 3)
+						ptmod_set_sample_value(sampleIndex, PTMOD_SAMPLE_FIELD_VOLUME, sample.volume + step);
+					else if (editorInfo.ptmodEditRow - sampleRowBase == 4)
+						ptmod_set_sample_value(sampleIndex, PTMOD_SAMPLE_FIELD_LOOP_START, (int)sample.loopStart + step * 2);
+					else
+						ptmod_set_sample_value(sampleIndex, PTMOD_SAMPLE_FIELD_LOOP_LENGTH, (int)sample.loopLength + step * 2);
+					break;
+				default:
+					return 0;
+				}
+			}
+		}
+		else
+		{
+			return 0;
+		}
+		snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD setting changed");
+		forceInfoLine = 1;
+		return 1;
+	default:
+		return 0;
+	}
+}
+
+static int consumePtmodSettingsKey(void)
+{
+	key = 0;
+	rawkey = 0;
+	return 1;
+}
+
+static int ptmodHasTextInput(void)
+{
+	if (ctrlpressed)
+		return 0;
+	return (key >= 32 && key < 127) || rawkey == KEY_BACKSPACE;
+}
+
+static int ptmodEditSideText(const PTMOD_PREVIEW_STATS *stats)
+{
+	char before[PTMOD_SAMPLE_NAME_LEN + 1];
+	char title[PTMOD_TITLE_LEN + 1];
+
+	(void)stats;
+	if (editorInfo.ptmodEditPage != 1 || !ptmodState.valid || !ptmodHasTextInput())
+		return 0;
+
+	if (editorInfo.ptmodEditRow != PTMOD_SIDE_ROW_TITLE)
+		return 0;
+	strncpy(title, ptmodState.title, sizeof title - 1);
+	title[sizeof title - 1] = 0;
+	strncpy(before, title, sizeof before - 1);
+	before[sizeof before - 1] = 0;
+	editstring(title, PTMOD_TITLE_LEN + 1);
+	if (!strcmp(before, title))
+		return 0;
+	if (!ptmodPushUndo("title"))
+		return 1;
+	ptmod_set_title(title);
+	snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD title: %.20s", ptmodState.title);
+	forceInfoLine = 1;
+	return 1;
+}
+
+static void ptmodDefaultSampleFilename(char *dest, size_t destSize, int sampleIndex)
+{
+	PTMOD_SAMPLE sample;
+	size_t len;
+
+	if (!dest || destSize == 0)
+		return;
+	dest[0] = 0;
+	if (ptmod_get_sample(sampleIndex, &sample) && sample.name[0])
+	{
+		size_t i;
+
+		for (i = 0; sample.name[i] && i < destSize - 5; i++)
+		{
+			unsigned char ch = (unsigned char)sample.name[i];
+			dest[i] = (ch >= 0x20 && ch < 0x7f && ch != '/' && ch != '\\') ? (char)ch : '_';
+		}
+		dest[i] = 0;
+	}
+	if (!dest[0])
+		snprintf(dest, destSize, "sample%02d", sampleIndex + 1);
+	len = strlen(dest);
+	if (len + 4 < destSize && !strchr(dest, '.'))
+		strcat(dest, ".raw");
+}
+
+static const char *ptmodRawFormatName(int rawFormat)
+{
+	switch (rawFormat)
+	{
+	case PTMOD_RAW_UNSIGNED_8:
+		return "unsigned 8-bit";
+	case PTMOD_RAW_SIGNED_16_LE:
+		return "signed 16-bit LE";
+	case PTMOD_RAW_UNSIGNED_16_LE:
+		return "unsigned 16-bit LE";
+	case PTMOD_RAW_SIGNED_16_BE:
+		return "signed 16-bit BE";
+	case PTMOD_RAW_UNSIGNED_16_BE:
+		return "unsigned 16-bit BE";
+	case PTMOD_RAW_SIGNED_8:
+	default:
+		return "signed 8-bit";
+	}
+}
+
+static void ptmodAdjustImportOption(PTMOD_SAMPLE_IMPORT_OPTIONS *options, int row, int delta)
+{
+	if (!options || delta == 0)
+		return;
+	switch (row)
+	{
+	case 0:
+		options->rawFormat += delta;
+		while (options->rawFormat < PTMOD_RAW_SIGNED_8)
+			options->rawFormat = PTMOD_RAW_UNSIGNED_16_BE;
+		while (options->rawFormat > PTMOD_RAW_UNSIGNED_16_BE)
+			options->rawFormat = PTMOD_RAW_SIGNED_8;
+		break;
+	case 1:
+		options->rawChannels += delta;
+		if (options->rawChannels < 1)
+			options->rawChannels = 1;
+		if (options->rawChannels > 8)
+			options->rawChannels = 8;
+		break;
+	case 2:
+		options->normalize = !options->normalize;
+		break;
+	case 3:
+		options->resample = !options->resample;
+		break;
+	case 4:
+	{
+		int rate = (int)options->sourceRate + delta;
+
+		if (rate < 1000)
+			rate = 1000;
+		if (rate > 96000)
+			rate = 96000;
+		options->sourceRate = (unsigned)rate;
+		break;
+	}
+	case 5:
+	{
+		int rate = (int)options->targetRate + delta;
+
+		if (rate < 1000)
+			rate = 1000;
+		if (rate > 96000)
+			rate = 96000;
+		options->targetRate = (unsigned)rate;
+		break;
+	}
+	default:
+		break;
+	}
+}
+
+static int ptmodShowSampleImportOptions(GTOBJECT *gt, const char *path,
+	PTMOD_SAMPLE_IMPORT_OPTIONS *options)
+{
+	int selected = 0;
+	int boxW = 72;
+	int boxH = 13;
+	int boxX = (getactivescreencolumns() - boxW) / 2;
+	int boxY = 5;
+
+	(void)gt;
+	if (!options)
+		return 0;
+	if (boxX < 0)
+		boxX = 0;
+	stopScreenDisplay();
+	for (;;)
+	{
+		int color = getColor(CORDER_INST_FOREGROUND, CORDER_INST_BACKGROUND);
+		int highlight = getColor(CORDER_INST_TABLE_EDITING, CORDER_INST_BACKGROUND);
+		int rateStep = ctrlpressed ? 1000 : shiftpressed ? 100 : 1;
+		int i;
+		const char *rows[6];
+		char rowText[6][80];
+
+		snprintf(rowText[0], sizeof rowText[0], "Raw format:   %s", ptmodRawFormatName(options->rawFormat));
+		snprintf(rowText[1], sizeof rowText[1], "Raw channels: %d", options->rawChannels);
+		snprintf(rowText[2], sizeof rowText[2], "Normalize:    %s", options->normalize ? "ON" : "OFF");
+		snprintf(rowText[3], sizeof rowText[3], "Resample:     %s", options->resample ? "ON" : "OFF");
+		snprintf(rowText[4], sizeof rowText[4], "Source Hz:    %u", options->sourceRate);
+		snprintf(rowText[5], sizeof rowText[5], "Target Hz:    %u", options->targetRate);
+		for (i = 0; i < 6; i++)
+			rows[i] = rowText[i];
+
+		ptmodDrawOpaqueBox(boxX, boxY, boxW, boxH,
+			getColor(CORDER_INST_FOREGROUND, CORDER_INST_BACKGROUND));
+		printtext(boxX + 2, boxY + 1, getColor(CTITLES_FOREGROUND, CGENERAL_BACKGROUND),
+			"MOD SAMPLE IMPORT OPTIONS");
+		snprintf(textbuffer, sizeof textbuffer, "File: %.58s", ptmodFilenameFromPath(path));
+		printtext(boxX + 2, boxY + 2, color, textbuffer);
+		for (i = 0; i < 6; i++)
+			printtext(boxX + 4, boxY + 4 + i, selected == i ? highlight : color, rows[i]);
+		printtext(boxX + 2, boxY + boxH - 2, color,
+			"Left/Right changes, Shift/Ctrl changes rate step, Enter imports, Esc cancels");
+		fliptoscreen();
+		waitkeymousenoupdate();
+		if (win_quitted || rawkey == KEY_ESC)
+		{
+			restartScreenDisplay();
+			key = 0;
+			rawkey = 0;
+			return 0;
+		}
+		if (rawkey == KEY_ENTER || rawkey == KEY_SPACE)
+		{
+			restartScreenDisplay();
+			key = 0;
+			rawkey = 0;
+			return 1;
+		}
+		if (rawkey == KEY_UP)
+		{
+			selected--;
+			if (selected < 0)
+				selected = 5;
+		}
+		else if (rawkey == KEY_DOWN)
+		{
+			selected++;
+			if (selected > 5)
+				selected = 0;
+		}
+		else if (rawkey == KEY_LEFT || rawkey == KEY_RIGHT)
+		{
+			int delta = rawkey == KEY_RIGHT ? 1 : -1;
+
+			if (selected >= 4)
+				delta *= rateStep;
+			ptmodAdjustImportOption(options, selected, delta);
+		}
+		key = 0;
+		rawkey = 0;
+	}
+}
+
+static int ptmodImportSample(GTOBJECT *gt)
+{
+	static PTMOD_SAMPLE_IMPORT_OPTIONS importOptions;
+	static int importOptionsInitialized = 0;
+	char error[256];
+	char path[MAX_PATHNAME];
+	int sampleIndex = ptmodSelectedSampleIndex();
+
+	if (!ptmodState.valid)
+		return 0;
+	if (!importOptionsInitialized)
+	{
+		ptmod_default_sample_import_options(&importOptions);
+		importOptionsInitialized = 1;
+	}
+	if (!ptmodsamplefilter[0])
+		strcpy(ptmodsamplefilter, "*");
+	if (!fileselector(ptmodsamplefilename, songpath, ptmodsamplefilter, "IMPORT MOD SAMPLE", 0, gt, CEDIT, 0))
+		return 1;
+	if (!makeSelectorPath(path, sizeof path, songpath, ptmodsamplefilename))
+	{
+		snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD sample path is too long");
+		forceInfoLine = 1;
+		return 1;
+	}
+	if (!ptmodShowSampleImportOptions(gt, path, &importOptions))
+	{
+		snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD sample import cancelled");
+		forceInfoLine = 1;
+		return 1;
+	}
+	if (!ptmodPushUndo("sample import"))
+		return 1;
+	error[0] = 0;
+	if (ptmod_replace_sample_from_file_with_options(sampleIndex, path, &importOptions, error, sizeof error))
+		snprintf(infoTextBuffer, sizeof infoTextBuffer, "%s", error);
+	else
+	{
+		ptmodCancelUndo();
+		snprintf(infoTextBuffer, sizeof infoTextBuffer, "%s", error[0] ? error : "Could not import MOD sample");
+	}
+	forceInfoLine = 1;
+	return 1;
+}
+
+static int ptmodExportSample(GTOBJECT *gt)
+{
+	char error[256];
+	char path[MAX_PATHNAME];
+	int sampleIndex = ptmodSelectedSampleIndex();
+
+	if (!ptmodState.valid)
+		return 0;
+	if (!ptmodsamplefilter[0])
+		strcpy(ptmodsamplefilter, "*.raw");
+	if (!ptmodsamplefilename[0])
+		ptmodDefaultSampleFilename(ptmodsamplefilename, sizeof ptmodsamplefilename, sampleIndex);
+	if (!fileselector(ptmodsamplefilename, songpath, ptmodsamplefilter, "EXPORT MOD SAMPLE", 3, gt, CEDIT, 1))
+		return 1;
+	if (!makeSelectorPath(path, sizeof path, songpath, ptmodsamplefilename))
+	{
+		snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD sample path is too long");
+		forceInfoLine = 1;
+		return 1;
+	}
+	if (ptmod_export_sample_to_file(sampleIndex, path, error, sizeof error))
+		snprintf(infoTextBuffer, sizeof infoTextBuffer, "%s", error);
+	else
+		snprintf(infoTextBuffer, sizeof infoTextBuffer, "%s", error[0] ? error : "Could not export MOD sample");
+	forceInfoLine = 1;
+	return 1;
+}
+
+static int ptmodDeleteSample(GTOBJECT *gt)
+{
+	int sampleIndex = ptmodSelectedSampleIndex();
+
+	if (!ptmodState.valid)
+		return 0;
+	snprintf(textbuffer, sizeof textbuffer, "Delete MOD sample %02d (y/n)?", sampleIndex + 1);
+	printtext(YES_NO_TEXT_X, YES_NO_TEXT_Y, getColor(15, CGENERAL_BACKGROUND), textbuffer);
+	waitkey(gt);
+	printbyterow(YES_NO_TEXT_X, YES_NO_TEXT_Y, getColor(15, CGENERAL_BACKGROUND), 32, 39);
+	if (key != 'y' && key != 'Y')
+	{
+		key = 0;
+		rawkey = 0;
+		return 1;
+	}
+	if (!ptmodPushUndo("sample delete"))
+		return 1;
+	if (ptmod_delete_sample(sampleIndex))
+		snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD sample %02d deleted", sampleIndex + 1);
+	else
+		snprintf(infoTextBuffer, sizeof infoTextBuffer, "Could not delete MOD sample %02d", sampleIndex + 1);
+	forceInfoLine = 1;
+	key = 0;
+	rawkey = 0;
+	return 1;
+}
+
+static unsigned ptmodClampEvenSamplePos(unsigned pos, unsigned length)
+{
+	if (pos > length)
+		pos = length;
+	return pos & ~1u;
+}
+
+static unsigned ptmodAdjustEvenSamplePos(unsigned pos, int delta, unsigned length)
+{
+	long next = (long)pos + delta;
+
+	if (next < 0)
+		next = 0;
+	if ((unsigned long)next > length)
+		next = length;
+	return ptmodClampEvenSamplePos((unsigned)next, length);
+}
+
+static void ptmodDrawOpaqueBox(int x, int y, int width, int height, int color)
+{
+	fillArea(x, y, width, height, color, ' ');
+	drawbox(x, y, color, width, height);
+	if (width > 2 && height > 2)
+		fillArea(x + 1, y + 1, width - 2, height - 2, color, ' ');
+}
+
+typedef struct
+{
+	const PTMOD_SAMPLE *sample;
+	int x;
+	int y;
+	int width;
+	int height;
+	unsigned cropStart;
+	unsigned cropEnd;
+	unsigned loopStart;
+	unsigned loopEnd;
+	int selected;
+	unsigned char backgroundColor;
+	unsigned char waveformColor;
+	unsigned char centerColor;
+	unsigned char cropColor;
+	unsigned char loopColor;
+	unsigned char selectedColor;
+} PTMOD_SAMPLE_WAVEFORM_OVERLAY;
+
+static void ptmodFillPixelRectClipped(int x, int y, int width, int height, unsigned char color)
+{
+	int row;
+
+	if (!gfx_screen || !gfx_screen->pixels || width <= 0 || height <= 0)
+		return;
+	if (x < 0)
+	{
+		width += x;
+		x = 0;
+	}
+	if (y < 0)
+	{
+		height += y;
+		y = 0;
+	}
+	if (x >= gfx_screen->w || y >= gfx_screen->h)
+		return;
+	if (x + width > gfx_screen->w)
+		width = gfx_screen->w - x;
+	if (y + height > gfx_screen->h)
+		height = gfx_screen->h - y;
+	if (width <= 0 || height <= 0)
+		return;
+
+	for (row = 0; row < height; row++)
+	{
+		unsigned char *dest = (unsigned char *)gfx_screen->pixels + (y + row) * gfx_screen->pitch + x;
+		memset(dest, color, (size_t)width);
+	}
+}
+
+static void ptmodDrawPixelVerticalLineClipped(int x, int y1, int y2, unsigned char color)
+{
+	int y;
+
+	if (!gfx_screen || !gfx_screen->pixels || x < 0 || x >= gfx_screen->w)
+		return;
+	if (y1 > y2)
+	{
+		int temp = y1;
+		y1 = y2;
+		y2 = temp;
+	}
+	if (y2 < 0 || y1 >= gfx_screen->h)
+		return;
+	if (y1 < 0)
+		y1 = 0;
+	if (y2 >= gfx_screen->h)
+		y2 = gfx_screen->h - 1;
+	for (y = y1; y <= y2; y++)
+		*((unsigned char *)gfx_screen->pixels + y * gfx_screen->pitch + x) = color;
+}
+
+static int ptmodSamplePosToPixel(unsigned pos, unsigned length, int width)
+{
+	if (!length || width <= 0)
+		return -1;
+	if (pos > length)
+		pos = length;
+	if (width == 1)
+		return 0;
+	return (int)(((unsigned long long)pos * (unsigned long long)(width - 1)) / length);
+}
+
+static void ptmodDrawSampleMarker(const PTMOD_SAMPLE_WAVEFORM_OVERLAY *overlay,
+	unsigned pos, unsigned char color, int selected)
+{
+	int markerX;
+	int dx;
+	int radius = selected ? 1 : 0;
+
+	if (!overlay || !overlay->sample || !overlay->sample->length)
+		return;
+	markerX = ptmodSamplePosToPixel(pos, overlay->sample->length, overlay->width);
+	if (markerX < 0)
+		return;
+	markerX += overlay->x;
+	for (dx = -radius; dx <= radius; dx++)
+		ptmodDrawPixelVerticalLineClipped(markerX + dx, overlay->y, overlay->y + overlay->height - 1,
+			selected ? overlay->selectedColor : color);
+	if (selected)
+	{
+		ptmodFillPixelRectClipped(markerX - 2, overlay->y, 5, 2, overlay->selectedColor);
+		ptmodFillPixelRectClipped(markerX - 2, overlay->y + overlay->height - 2, 5, 2,
+			overlay->selectedColor);
+	}
+}
+
+static int ptmodDrawSampleWaveformOverlay(void *userdata)
+{
+	const PTMOD_SAMPLE_WAVEFORM_OVERLAY *overlay = (const PTMOD_SAMPLE_WAVEFORM_OVERLAY *)userdata;
+	const PTMOD_SAMPLE *sample;
+	int center;
+	int x;
+
+	if (!overlay || overlay->width <= 0 || overlay->height <= 0)
+		return 0;
+	sample = overlay->sample;
+	center = overlay->y + overlay->height / 2;
+	ptmodFillPixelRectClipped(overlay->x, overlay->y, overlay->width, overlay->height,
+		overlay->backgroundColor);
+	ptmodFillPixelRectClipped(overlay->x, center, overlay->width, 1, overlay->centerColor);
+
+	if (sample && sample->data && sample->length)
+	{
+		int topRange = center - overlay->y;
+		int bottomRange = overlay->y + overlay->height - 1 - center;
+
+		for (x = 0; x < overlay->width; x++)
+		{
+			size_t start = ((size_t)sample->length * (size_t)x) / (size_t)overlay->width;
+			size_t end = ((size_t)sample->length * (size_t)(x + 1)) / (size_t)overlay->width;
+			size_t p;
+			int minValue = 0;
+			int maxValue = 0;
+			int top;
+			int bottom;
+
+			if (end <= start)
+				end = start + 1;
+			if (end > sample->length)
+				end = sample->length;
+			for (p = start; p < end; p++)
+			{
+				int value = (signed char)sample->data[p];
+
+				if (value < minValue)
+					minValue = value;
+				if (value > maxValue)
+					maxValue = value;
+			}
+			top = center - (maxValue * topRange) / 128;
+			bottom = center - (minValue * bottomRange) / 128;
+			if (top > bottom)
+			{
+				int temp = top;
+				top = bottom;
+				bottom = temp;
+			}
+			ptmodDrawPixelVerticalLineClipped(overlay->x + x, top, bottom, overlay->waveformColor);
+		}
+
+		ptmodDrawSampleMarker(overlay, overlay->cropStart, overlay->cropColor, overlay->selected == 0);
+		ptmodDrawSampleMarker(overlay, overlay->cropEnd, overlay->cropColor, overlay->selected == 1);
+		ptmodDrawSampleMarker(overlay, overlay->loopStart, overlay->loopColor, overlay->selected == 2);
+		ptmodDrawSampleMarker(overlay, overlay->loopEnd, overlay->loopColor, overlay->selected == 3);
+	}
+	return 1;
+}
+
+static void ptmodSetupSampleWaveformOverlay(PTMOD_SAMPLE_WAVEFORM_OVERLAY *overlay,
+	const PTMOD_SAMPLE *sample, int x, int y, int width, int height,
+	unsigned cropStart, unsigned cropEnd, unsigned loopStart, unsigned loopEnd, int selected)
+{
+	int color = getColor(CORDER_INST_FOREGROUND, CORDER_INST_BACKGROUND);
+
+	if (!overlay)
+		return;
+	fillArea(x, y, width, height, color, ' ');
+	memset(overlay, 0, sizeof *overlay);
+	overlay->sample = sample;
+	overlay->x = x * getfontwidth();
+	overlay->y = y * getfontheight();
+	overlay->width = width * getfontwidth();
+	overlay->height = height * getfontheight();
+	overlay->cropStart = cropStart;
+	overlay->cropEnd = cropEnd;
+	overlay->loopStart = loopStart;
+	overlay->loopEnd = loopEnd;
+	overlay->selected = selected;
+	overlay->backgroundColor = (unsigned char)((color >> 8) & 0xff);
+	overlay->waveformColor = (unsigned char)(color & 0xff);
+	overlay->centerColor = (unsigned char)CORDER_INST_TABLE_EDITING;
+	overlay->cropColor = (unsigned char)CTITLES_FOREGROUND;
+	overlay->loopColor = (unsigned char)CPATTERN_LOOP_MARKER_FOREGROUND;
+	overlay->selectedColor = (unsigned char)CPATTERN_HIGHLIGHT_FOREGROUND;
+	setConsolePixelOverlay(ptmodDrawSampleWaveformOverlay, overlay);
+}
+
+static void ptmodAdjustSampleEditorValue(int selected, int delta, PTMOD_SAMPLE *sample,
+	unsigned *cropStart, unsigned *cropEnd, unsigned *loopStart, unsigned *loopEnd,
+	unsigned *sourceRate, unsigned *targetRate)
+{
+	unsigned length = sample ? sample->length : 0;
+
+	if (selected == 0)
+	{
+		*cropStart = ptmodAdjustEvenSamplePos(*cropStart, delta, length);
+		if (*cropStart >= *cropEnd && *cropEnd > 2)
+			*cropStart = *cropEnd - 2;
+	}
+	else if (selected == 1)
+	{
+		*cropEnd = ptmodAdjustEvenSamplePos(*cropEnd, delta, length);
+		if (*cropEnd <= *cropStart)
+			*cropEnd = *cropStart + 2 <= length ? *cropStart + 2 : length;
+	}
+	else if (selected == 2)
+	{
+		*loopStart = ptmodAdjustEvenSamplePos(*loopStart, delta, length);
+		if (*loopStart > *loopEnd)
+			*loopEnd = *loopStart;
+	}
+	else if (selected == 3)
+	{
+		*loopEnd = ptmodAdjustEvenSamplePos(*loopEnd, delta, length);
+		if (*loopEnd < *loopStart)
+			*loopStart = *loopEnd;
+	}
+	else if (selected == 4)
+	{
+		int rate = (int)*sourceRate + delta;
+		if (rate < 1000)
+			rate = 1000;
+		if (rate > 96000)
+			rate = 96000;
+		*sourceRate = (unsigned)rate;
+	}
+	else if (selected == 5)
+	{
+		int rate = (int)*targetRate + delta;
+		if (rate < 1000)
+			rate = 1000;
+		if (rate > 96000)
+			rate = 96000;
+		*targetRate = (unsigned)rate;
+	}
+}
+
+static int ptmodOpenSampleEditor(GTOBJECT *gt)
+{
+	static unsigned sourceRate = 8363;
+	static unsigned targetRate = 8363;
+	PTMOD_SAMPLE sample;
+	unsigned cropStart = 0;
+	unsigned cropEnd = 0;
+	unsigned loopStart = 0;
+	unsigned loopEnd = 0;
+	int sampleIndex = ptmodSelectedSampleIndex();
+	int selected = 0;
+	int activeColumns = getactivescreencolumns();
+	int boxW;
+	int boxH = 29;
+	int boxX;
+	int boxY = 3;
+	int waveX;
+	int waveY;
+	int waveW;
+	int waveH;
+	int rowY;
+	char error[256];
+
+	if (!ptmodState.valid)
+		return 0;
+	if (activeColumns <= 0 || activeColumns > MAX_COLUMNS)
+		activeColumns = MAX_COLUMNS;
+	boxW = activeColumns - 8;
+	if (boxW > 128)
+		boxW = 128;
+	if (boxW < 80)
+		boxW = activeColumns > 84 ? 80 : activeColumns - 4;
+	if (boxW < 20)
+		boxW = activeColumns;
+	boxX = (activeColumns - boxW) / 2;
+	if (boxX < 0)
+		boxX = 0;
+	waveX = boxX + 2;
+	waveY = boxY + 4;
+	waveW = boxW - 4;
+	waveH = 11;
+	rowY = waveY + waveH + 1;
+	if (!ptmod_get_sample(sampleIndex, &sample))
+		memset(&sample, 0, sizeof sample);
+	cropEnd = sample.length;
+	loopStart = sample.loopStart;
+	loopEnd = sample.loopStart + sample.loopLength;
+
+	stopScreenDisplay();
+	for (;;)
+	{
+		int color = getColor(CORDER_INST_FOREGROUND, CORDER_INST_BACKGROUND);
+		int highlight = getColor(CORDER_INST_TABLE_EDITING, CORDER_INST_BACKGROUND);
+		int step = ctrlpressed ? 1024 : shiftpressed ? 128 : 2;
+		PTMOD_SAMPLE_WAVEFORM_OVERLAY waveformOverlay;
+
+		if (!ptmod_get_sample(sampleIndex, &sample))
+			memset(&sample, 0, sizeof sample);
+		if (cropEnd > sample.length)
+			cropEnd = sample.length;
+		if (loopEnd > sample.length)
+			loopEnd = sample.length;
+		cropStart = ptmodClampEvenSamplePos(cropStart, sample.length);
+		cropEnd = ptmodClampEvenSamplePos(cropEnd, sample.length);
+		loopStart = ptmodClampEvenSamplePos(loopStart, sample.length);
+		loopEnd = ptmodClampEvenSamplePos(loopEnd, sample.length);
+		if (cropEnd <= cropStart && sample.length >= 2)
+			cropEnd = sample.length;
+		if (loopEnd < loopStart)
+			loopEnd = loopStart;
+
+		ptmodDrawOpaqueBox(boxX, boxY, boxW, boxH,
+			getColor(CORDER_INST_FOREGROUND, CORDER_INST_BACKGROUND));
+		snprintf(textbuffer, sizeof textbuffer, "MOD SAMPLE EDITOR  %02d  %.60s",
+			sampleIndex + 1, sample.name[0] ? sample.name : "(empty)");
+		printtext(boxX + 2, boxY + 1, getColor(CTITLES_FOREGROUND, CGENERAL_BACKGROUND), textbuffer);
+		snprintf(textbuffer, sizeof textbuffer, "Length:%u  Volume:%d  Finetune:%d",
+			sample.length, sample.volume, sample.finetune);
+		printtext(boxX + 2, boxY + 2, color, textbuffer);
+		ptmodSetupSampleWaveformOverlay(&waveformOverlay, &sample, waveX, waveY, waveW, waveH,
+			cropStart, cropEnd, loopStart, loopEnd, selected);
+
+		snprintf(textbuffer, sizeof textbuffer, "Crop start:%6u", cropStart);
+		printtext(boxX + 2, rowY + 0, selected == 0 ? highlight : color, textbuffer);
+		snprintf(textbuffer, sizeof textbuffer, "Crop end:  %6u", cropEnd);
+		printtext(boxX + 2, rowY + 1, selected == 1 ? highlight : color, textbuffer);
+		snprintf(textbuffer, sizeof textbuffer, "Loop start:%6u", loopStart);
+		printtext(boxX + 2, rowY + 2, selected == 2 ? highlight : color, textbuffer);
+		snprintf(textbuffer, sizeof textbuffer, "Loop end:  %6u", loopEnd);
+		printtext(boxX + 2, rowY + 3, selected == 3 ? highlight : color, textbuffer);
+		snprintf(textbuffer, sizeof textbuffer, "Source Hz:%6u", sourceRate);
+		printtext(boxX + 30, rowY + 0, selected == 4 ? highlight : color, textbuffer);
+		snprintf(textbuffer, sizeof textbuffer, "Target Hz:%6u", targetRate);
+		printtext(boxX + 30, rowY + 1, selected == 5 ? highlight : color, textbuffer);
+		printtext(boxX + 30, rowY + 2, color, "Mouse-drag selected marker on waveform");
+		printtext(boxX + 2, rowY + 5, color,
+			"A audition  C crop  T trim  L loop  R resample  I import  E export  D delete");
+		printtext(boxX + 2, rowY + 6, color,
+			"Arrows move marker/value, Shift/Ctrl = larger steps, Esc/Enter closes");
+
+		fliptoscreen();
+		waitkeymousenoupdate();
+		clearConsolePixelOverlay();
+		if (win_quitted)
+			break;
+		{
+			int wavePixelX = waveX * getfontwidth();
+			int wavePixelY = waveY * getfontheight();
+			int wavePixelW = waveW * getfontwidth();
+			int wavePixelH = waveH * getfontheight();
+			int mx = (int)getmousepixelx();
+			int my = (int)getmousepixely();
+
+			if (mouseb && sample.length && wavePixelW > 0 && wavePixelH > 0 &&
+				mx >= wavePixelX && mx < wavePixelX + wavePixelW &&
+				my >= wavePixelY && my < wavePixelY + wavePixelH)
+			{
+				unsigned denom = (unsigned)(wavePixelW > 1 ? wavePixelW - 1 : 1);
+				unsigned pos = (unsigned)(((unsigned long long)sample.length *
+					(unsigned long long)(mx - wavePixelX)) / denom);
+
+				pos = ptmodClampEvenSamplePos(pos, sample.length);
+				if (selected == 0)
+					cropStart = pos;
+				else if (selected == 1)
+					cropEnd = pos;
+				else if (selected == 2)
+					loopStart = pos;
+				else if (selected == 3)
+					loopEnd = pos;
+				if (cropEnd <= cropStart && sample.length >= 2)
+					cropEnd = sample.length;
+				if (loopEnd < loopStart)
+					loopEnd = loopStart;
+				key = 0;
+				rawkey = 0;
+				continue;
+			}
+		}
+		if (rawkey == KEY_ESC || rawkey == KEY_ENTER)
+			break;
+		if (rawkey == KEY_UP)
+		{
+			selected--;
+			if (selected < 0)
+				selected = 5;
+		}
+		else if (rawkey == KEY_DOWN)
+		{
+			selected++;
+			if (selected > 5)
+				selected = 0;
+		}
+		else if (rawkey == KEY_LEFT || rawkey == KEY_RIGHT)
+		{
+			ptmodAdjustSampleEditorValue(selected, rawkey == KEY_LEFT ? -step : step,
+				&sample, &cropStart, &cropEnd, &loopStart, &loopEnd, &sourceRate, &targetRate);
+		}
+		else if (ptmodHandleSampleOctaveShortcut())
+		{
+			if (sampleIndex != ptmodSelectedSampleIndex())
+			{
+				sampleIndex = ptmodSelectedSampleIndex();
+				if (ptmod_get_sample(sampleIndex, &sample))
+				{
+					cropStart = 0;
+					cropEnd = sample.length;
+					loopStart = sample.loopStart;
+					loopEnd = sample.loopStart + sample.loopLength;
+					sourceRate = targetRate = 8363;
+				}
+			}
+		}
+			else if (rawkey == KEY_A)
+			{
+				ptmodplay_audition_sample_with_loop(sampleIndex,
+					loopStart, loopEnd >= loopStart ? loopEnd - loopStart : 0);
+			}
+			else if (rawkey == KEY_C)
+			{
+				int ok = 0;
+				int pushed;
+
+				error[0] = 0;
+				pushed = ptmodPushUndo("sample crop");
+				if (pushed)
+					ok = ptmod_crop_sample(sampleIndex, cropStart, cropEnd, error, sizeof error);
+				if (pushed && ok)
+				{
+					snprintf(infoTextBuffer, sizeof infoTextBuffer, "%s", error);
+					cropStart = 0;
+					if (ptmod_get_sample(sampleIndex, &sample))
+						cropEnd = sample.length;
+				}
+				else if (pushed)
+				{
+					ptmodCancelUndo();
+					snprintf(infoTextBuffer, sizeof infoTextBuffer, "%s", error[0] ? error : "Could not crop sample");
+				}
+				forceInfoLine = 1;
+			}
+			else if (rawkey == KEY_T)
+			{
+				int ok = 0;
+				int pushed;
+
+				error[0] = 0;
+				pushed = ptmodPushUndo("sample trim");
+				if (pushed)
+					ok = ptmod_trim_sample(sampleIndex, 1, error, sizeof error);
+				if (pushed && ok)
+				{
+					snprintf(infoTextBuffer, sizeof infoTextBuffer, "%s", error);
+					cropStart = 0;
+					if (ptmod_get_sample(sampleIndex, &sample))
+						cropEnd = sample.length;
+				}
+				else if (pushed)
+				{
+					ptmodCancelUndo();
+					snprintf(infoTextBuffer, sizeof infoTextBuffer, "%s", error[0] ? error : "Could not trim sample");
+				}
+				forceInfoLine = 1;
+			}
+			else if (rawkey == KEY_L)
+			{
+				int ok = 0;
+				int pushed = ptmodPushUndo("sample loop");
+
+				if (pushed)
+					ok = ptmod_set_sample_loop(sampleIndex, loopStart, loopEnd >= loopStart ? loopEnd - loopStart : 0);
+				if (pushed && ok)
+					snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD sample %02d loop updated", sampleIndex + 1);
+				else if (pushed)
+				{
+					ptmodCancelUndo();
+					snprintf(infoTextBuffer, sizeof infoTextBuffer, "Could not update MOD sample loop");
+				}
+				forceInfoLine = 1;
+			}
+			else if (rawkey == KEY_R)
+			{
+				int ok = 0;
+				int pushed;
+
+				error[0] = 0;
+				pushed = ptmodPushUndo("sample resample");
+				if (pushed)
+					ok = ptmod_resample_sample(sampleIndex, sourceRate, targetRate, error, sizeof error);
+				if (pushed && ok)
+				{
+					snprintf(infoTextBuffer, sizeof infoTextBuffer, "%s", error);
+					cropStart = 0;
+					if (ptmod_get_sample(sampleIndex, &sample))
+						cropEnd = sample.length;
+					loopStart = sample.loopStart;
+					loopEnd = sample.loopStart + sample.loopLength;
+				}
+				else if (pushed)
+				{
+					ptmodCancelUndo();
+					snprintf(infoTextBuffer, sizeof infoTextBuffer, "%s", error[0] ? error : "Could not resample sample");
+				}
+				forceInfoLine = 1;
+			}
+		else if (rawkey == KEY_I)
+		{
+			restartScreenDisplay();
+			ptmodImportSample(gt);
+			stopScreenDisplay();
+			if (ptmod_get_sample(sampleIndex, &sample))
+			{
+				cropStart = 0;
+				cropEnd = sample.length;
+				loopStart = sample.loopStart;
+				loopEnd = sample.loopStart + sample.loopLength;
+			}
+		}
+		else if (rawkey == KEY_E)
+		{
+			restartScreenDisplay();
+			ptmodExportSample(gt);
+			stopScreenDisplay();
+		}
+		else if (rawkey == KEY_D)
+		{
+			restartScreenDisplay();
+			ptmodDeleteSample(gt);
+			stopScreenDisplay();
+			cropStart = cropEnd = loopStart = loopEnd = 0;
+		}
+		key = 0;
+		rawkey = 0;
+		}
+		clearConsolePixelOverlay();
+		ptmodplay_stop_audition();
+		restartScreenDisplay();
+		key = 0;
+	rawkey = 0;
+	return 1;
+}
+
+typedef struct
+{
+	int effect;
+	int sub;
+	int defaultParam;
+	const char *name;
+	const char *detail;
+} PTMOD_EFFECT_TEMPLATE;
+
+static const PTMOD_EFFECT_TEMPLATE ptmodEffectTemplates[] = {
+	{ 0x0, -1, 0x00, "Arpeggio / none", "x/y semitone offsets; 000 is no effect" },
+	{ 0x1, -1, 0x01, "Portamento up", "slide speed 00-FF" },
+	{ 0x2, -1, 0x01, "Portamento down", "slide speed 00-FF" },
+	{ 0x3, -1, 0x10, "Tone portamento", "target-note slide speed" },
+	{ 0x4, -1, 0x47, "Vibrato", "x speed, y depth" },
+	{ 0x5, -1, 0x0f, "Tone porta + volslide", "x up or y down volume slide" },
+	{ 0x6, -1, 0x0f, "Vibrato + volslide", "x up or y down volume slide" },
+	{ 0x7, -1, 0x47, "Tremolo", "x speed, y depth" },
+	{ 0x8, -1, 0x80, "Set panning", "00 left, 80 center, FF right where supported" },
+	{ 0x9, -1, 0x10, "Sample offset", "start at xx00 in sample" },
+	{ 0xA, -1, 0x0f, "Volume slide", "x up or y down" },
+	{ 0xB, -1, 0x00, "Position jump", "order number" },
+	{ 0xC, -1, 0x40, "Set volume", "00-40" },
+	{ 0xD, -1, 0x00, "Pattern break", "BCD row 00-63" },
+	{ 0xF, -1, 0x06, "Speed / BPM", "01-1F speed, 20-FF BPM" },
+	{ 0xE, 0x0, 0x00, "E0 filter", "Amiga low-pass filter toggle" },
+	{ 0xE, 0x1, 0x10, "E1 fine porta up", "fine slide amount 0-F" },
+	{ 0xE, 0x2, 0x20, "E2 fine porta down", "fine slide amount 0-F" },
+	{ 0xE, 0x3, 0x30, "E3 glissando", "0 off, 1 on" },
+	{ 0xE, 0x4, 0x40, "E4 vibrato waveform", "0 sine, 1 ramp, 2 square, +4 no retrig" },
+	{ 0xE, 0x5, 0x50, "E5 set finetune", "sample finetune 0-F" },
+	{ 0xE, 0x6, 0x60, "E6 pattern loop", "0 set loop, 1-F repeat" },
+	{ 0xE, 0x7, 0x70, "E7 tremolo waveform", "0 sine, 1 ramp, 2 square, +4 no retrig" },
+	{ 0xE, 0x8, 0x80, "E8 panning", "legacy 4-bit panning where supported" },
+	{ 0xE, 0x9, 0x90, "E9 retrigger note", "tick interval 1-F" },
+	{ 0xE, 0xA, 0xA0, "EA fine volume up", "fine volume amount 0-F" },
+	{ 0xE, 0xB, 0xB0, "EB fine volume down", "fine volume amount 0-F" },
+	{ 0xE, 0xC, 0xC0, "EC note cut", "cut at tick 0-F" },
+	{ 0xE, 0xD, 0xD0, "ED note delay", "delay note to tick 0-F" },
+	{ 0xE, 0xE, 0xE0, "EE pattern delay", "delay rows 0-F" },
+	{ 0xE, 0xF, 0xF0, "EF invert loop", "funk/invert speed 0-F" }
+};
+
+static int ptmodApplyEffectTemplate(const PTMOD_PREVIEW_STATS *stats, int effect, int param)
+{
+	int cursorRow;
+	int orderIndex;
+	int pattern;
+
+	if (!stats || !stats->loaded || editorInfo.ptmodEditPage != 0)
+		return 0;
+	clampPtmodStreamCursor(stats);
+	cursorRow = ptmodStreamCursorRow(stats);
+	orderIndex = ptmodEditorOrderIndex(stats);
+	pattern = ptmod_order_pattern(orderIndex);
+	if (pattern < 0)
+		return 0;
+	if (!ptmodPushUndo("effect template"))
+		return 1;
+	if (!ptmod_set_pattern_cell_value(pattern, cursorRow, editorInfo.ptmodStreamChannel,
+		PTMOD_ROW_FIELD_EFFECT, effect))
+		return 0;
+	if (!ptmod_set_pattern_cell_value(pattern, cursorRow, editorInfo.ptmodStreamChannel,
+		PTMOD_ROW_FIELD_PARAM, param))
+		return 0;
+	ptmodSetStreamSubColumn(PTMOD_STREAM_SUBCOLUMN_EFFECT);
+	editorInfo.ptmodStreamFollow = 0;
+	ptmodShowEffectInfo(effect, param);
+	return 1;
+}
+
+static int ptmodEffectTemplateMatchesCell(const PTMOD_EFFECT_TEMPLATE *item, const PTMOD_CELL *cell)
+{
+	if (!item || !cell || item->effect != cell->effect)
+		return 0;
+	if (item->effect == 0xE && item->sub >= 0)
+		return ((cell->param >> 4) & 0x0f) == item->sub;
+	return item->sub < 0;
+}
+
+static int ptmodEffectParamForTemplate(const PTMOD_EFFECT_TEMPLATE *item, const PTMOD_CELL *cell)
+{
+	if (ptmodEffectTemplateMatchesCell(item, cell))
+		return cell->param;
+	return item ? item->defaultParam : 0;
+}
+
+static int ptmodPatternBreakToRow(int param)
+{
+	int row = ((param >> 4) & 0x0f) * 10 + (param & 0x0f);
+
+	if (row > 63)
+		row = 63;
+	return row;
+}
+
+static int ptmodRowToPatternBreak(int row)
+{
+	if (row < 0)
+		row = 0;
+	if (row > 63)
+		row = 63;
+	return ((row / 10) << 4) | (row % 10);
+}
+
+static int ptmodAdjustEffectEditorParam(const PTMOD_EFFECT_TEMPLATE *item,
+	int param, int delta)
+{
+	int value;
+	int maxValue = 0xff;
+
+	if (!item || delta == 0)
+		return param;
+	if (item->effect == 0xE && item->sub >= 0)
+	{
+		value = param & 0x0f;
+		value += delta;
+		if (value < 0)
+			value = 0;
+		if (value > 0x0f)
+			value = 0x0f;
+		return (item->sub << 4) | value;
+	}
+	if (item->effect == 0xD)
+		return ptmodRowToPatternBreak(ptmodPatternBreakToRow(param) + delta);
+	if (item->effect == 0xB && ptmodState.songLength > 0)
+		maxValue = ptmodState.songLength - 1;
+	else if (item->effect == 0xC)
+		maxValue = 0x40;
+	value = param + delta;
+	if (value < 0)
+		value = 0;
+	if (value > maxValue)
+		value = maxValue;
+	return ptmod_clamp_effect_param(item->effect, value);
+}
+
+static int ptmodShowEffectTemplateMenu(GTOBJECT *gt, const PTMOD_PREVIEW_STATS *stats)
+{
+	PTMOD_CELL cell;
+	int orderIndex;
+	int pattern;
+	int row;
+	int selected = 0;
+	int param = 0;
+	int count = (int)(sizeof ptmodEffectTemplates / sizeof ptmodEffectTemplates[0]);
+	int boxW = 76;
+	int boxH = 24;
+	int boxX = (MAX_COLUMNS - boxW) / 2;
+	int boxY = 4;
+	int i;
+
+	(void)gt;
+	if (!stats || !stats->loaded || editorInfo.ptmodEditPage != 0 ||
+		(editorInfo.ptmodStreamField != PTMOD_ROW_FIELD_EFFECT &&
+		editorInfo.ptmodStreamField != PTMOD_ROW_FIELD_PARAM))
+		return 0;
+	orderIndex = ptmodEditorOrderIndex(stats);
+	pattern = ptmod_order_pattern(orderIndex);
+	row = ptmodStreamCursorRow(stats);
+	if (pattern < 0 || !ptmod_get_pattern_cell(pattern, row, editorInfo.ptmodStreamChannel, &cell))
+		return 0;
+	for (i = 0; i < count; i++)
+	{
+		if (ptmodEffectTemplateMatchesCell(&ptmodEffectTemplates[i], &cell))
+		{
+			selected = i;
+			break;
+		}
+	}
+	param = ptmodEffectParamForTemplate(&ptmodEffectTemplates[selected], &cell);
+	if (boxH > TRANSPORT_BAR_Y - 1)
+		boxH = TRANSPORT_BAR_Y - 1;
+	if (boxX < 0)
+		boxX = 0;
+
+	stopScreenDisplay();
+	for (;;)
+	{
+		const PTMOD_EFFECT_TEMPLATE *selectedItem = &ptmodEffectTemplates[selected];
+		int first = selected - (boxH - 9) / 2;
+		int visible = boxH - 8;
+		int step = ctrlpressed ? 0x10 : shiftpressed ? 4 : 1;
+		char help[96];
+		char validation[128];
+
+		if (first < 0)
+			first = 0;
+		if (first + visible > count)
+			first = count - visible;
+		if (first < 0)
+			first = 0;
+		ptmodDrawOpaqueBox(boxX, boxY, boxW, boxH,
+			getColor(CORDER_INST_FOREGROUND, CORDER_INST_BACKGROUND));
+		printtext(boxX + 2, boxY + 1, getColor(CTITLES_FOREGROUND, CGENERAL_BACKGROUND),
+			"MOD EFFECT EDITOR");
+		for (i = 0; i < visible && first + i < count; i++)
+		{
+			const PTMOD_EFFECT_TEMPLATE *item = &ptmodEffectTemplates[first + i];
+			int lineColor = first + i == selected ?
+				getColor(CORDER_INST_TABLE_EDITING, CORDER_INST_BACKGROUND) :
+				getColor(CORDER_INST_FOREGROUND, CORDER_INST_BACKGROUND);
+			int itemParam = first + i == selected ? param : item->defaultParam;
+
+			ptmod_format_effect_help(item->effect, itemParam, help, sizeof help);
+			snprintf(textbuffer, sizeof textbuffer, "%02d  %X%02X  %-24.24s %.34s",
+				first + i + 1, item->effect, itemParam & 0xff, item->name, help);
+			printtext(boxX + 2, boxY + 3 + i, lineColor, textbuffer);
+		}
+		ptmod_validate_effect_param(selectedItem->effect, param, validation, sizeof validation);
+		ptmod_format_effect_help(selectedItem->effect, param, help, sizeof help);
+		snprintf(textbuffer, sizeof textbuffer, "Selected: %X%02X  %.50s",
+			selectedItem->effect, param & 0xff, selectedItem->name);
+		printtext(boxX + 2, boxY + boxH - 4, getColor(CTITLES_FOREGROUND, CGENERAL_BACKGROUND), textbuffer);
+		snprintf(textbuffer, sizeof textbuffer, "Param: %.64s", selectedItem->detail);
+		printtext(boxX + 2, boxY + boxH - 3, getColor(CORDER_INST_FOREGROUND, CORDER_INST_BACKGROUND), textbuffer);
+		snprintf(textbuffer, sizeof textbuffer, "Valid: %.64s", validation);
+		printtext(boxX + 2, boxY + boxH - 2, getColor(CORDER_INST_FOREGROUND, CORDER_INST_BACKGROUND), textbuffer);
+		printtext(boxX + 2, boxY + boxH - 1, getColor(CORDER_INST_FOREGROUND, CORDER_INST_BACKGROUND),
+			"Up/Down selects, Left/Right edits param, Enter applies, Esc cancels");
+		fliptoscreen();
+		waitkeymousenoupdate();
+		if (win_quitted || rawkey == KEY_ESC)
+			break;
+		if (mouseb && mousex >= boxX + 2 && mousex < boxX + boxW - 2 &&
+			mousey >= boxY + 3 && mousey < boxY + 3 + visible)
+		{
+			int clicked = first + mousey - (boxY + 3);
+
+			if (clicked >= 0 && clicked < count)
+			{
+				selected = clicked;
+				param = ptmodEffectParamForTemplate(&ptmodEffectTemplates[selected], &cell);
+			}
+		}
+		else if (rawkey == KEY_UP)
+		{
+			selected--;
+			if (selected < 0)
+				selected = count - 1;
+			param = ptmodEffectParamForTemplate(&ptmodEffectTemplates[selected], &cell);
+		}
+		else if (rawkey == KEY_DOWN)
+		{
+			selected++;
+			if (selected >= count)
+				selected = 0;
+			param = ptmodEffectParamForTemplate(&ptmodEffectTemplates[selected], &cell);
+		}
+		else if (rawkey == KEY_HOME)
+		{
+			selected = 0;
+			param = ptmodEffectParamForTemplate(&ptmodEffectTemplates[selected], &cell);
+		}
+		else if (rawkey == KEY_END)
+		{
+			selected = count - 1;
+			param = ptmodEffectParamForTemplate(&ptmodEffectTemplates[selected], &cell);
+		}
+		else if (rawkey == KEY_LEFT || rawkey == KEY_RIGHT)
+		{
+			param = ptmodAdjustEffectEditorParam(&ptmodEffectTemplates[selected],
+				param, rawkey == KEY_RIGHT ? step : -step);
+		}
+		else if (rawkey == KEY_ENTER || rawkey == KEY_SPACE)
+		{
+			ptmodApplyEffectTemplate(stats, ptmodEffectTemplates[selected].effect,
+				ptmod_clamp_effect_param(ptmodEffectTemplates[selected].effect, param));
+			break;
+		}
+		key = 0;
+		rawkey = 0;
+	}
+	restartScreenDisplay();
+	key = 0;
+	rawkey = 0;
+	return 1;
+}
+
+static int ptmodHandleFileKey(GTOBJECT *gt)
+{
+	char ptmodError[256];
+
+	if (!ctrlpressed)
+		return 0;
+
+	switch (rawkey)
+	{
+	case KEY_N:
+		if (!ptmodConfirmDiscard(gt, "new"))
+			return 1;
+		ptmod_create_blank();
+		ptmodResetEditorPosition();
+		snprintf(infoTextBuffer, sizeof infoTextBuffer, "%s", ptmod_status_text());
+		forceInfoLine = 1;
+		return 1;
+	case KEY_R:
+		if (!ptmodConfirmDiscard(gt, "reload"))
+			return 1;
+		if (ptmod_reload_current(ptmodError, sizeof ptmodError))
+		{
+			ptmodResetEditorPosition();
+			snprintf(infoTextBuffer, sizeof infoTextBuffer, "%s", ptmod_status_text());
+		}
+		else
+		{
+			snprintf(infoTextBuffer, sizeof infoTextBuffer, "%s", ptmodError);
+		}
+		forceInfoLine = 1;
+		return 1;
+	case KEY_U:
+		if (!ptmodConfirmDiscard(gt, "unload"))
+			return 1;
+		ptmod_clear();
+		ptmodResetEditorPosition();
+		snprintf(infoTextBuffer, sizeof infoTextBuffer, "%s", ptmod_status_text());
+		forceInfoLine = 1;
+		return 1;
+	case KEY_I:
+		return ptmodImportSample(gt);
+	case KEY_E:
+		return ptmodExportSample(gt);
+	case KEY_D:
+		return ptmodDeleteSample(gt);
+	case KEY_W:
+		return ptmodOpenSampleEditor(gt);
+	default:
+		return 0;
+	}
+}
+
+static int ptmodStreamDisplayRowStart(const PTMOD_PREVIEW_STATS *stats)
+{
+	int cursorRow = ptmodStreamCursorRow(stats);
+	int maxRowStart = PTMOD_ROWS > VISIBLEPATTROWS ? PTMOD_ROWS - VISIBLEPATTROWS : 0;
+	int rowStart;
+
+	if (cursorRow < 0)
+		cursorRow = 0;
+	if (cursorRow >= PTMOD_ROWS)
+		cursorRow = PTMOD_ROWS - 1;
+
+	if (stats && editorInfo.ptmodStreamFollow && stats->active)
+	{
+		rowStart = cursorRow - VISIBLEPATTROWS / 2;
+		if (rowStart < 0)
+			rowStart = 0;
+	}
+	else
+	{
+		rowStart = editorInfo.ptmodStreamView;
+		if (cursorRow < rowStart)
+			rowStart = cursorRow;
+		if (cursorRow >= rowStart + VISIBLEPATTROWS)
+			rowStart = cursorRow - VISIBLEPATTROWS + 1;
+	}
+	if (rowStart > maxRowStart)
+		rowStart = maxRowStart;
+	if (rowStart < 0)
+		rowStart = 0;
+	return rowStart;
+}
+
+static int ptmodSubColumnFromMouseX(int fieldX)
+{
+	if (fieldX >= 0 && fieldX <= 2)
+		return PTMOD_STREAM_SUBCOLUMN_NOTE;
+	if (fieldX == 4)
+		return PTMOD_STREAM_SUBCOLUMN_SAMPLE_HI;
+	if (fieldX == 5)
+		return PTMOD_STREAM_SUBCOLUMN_SAMPLE_LO;
+	if (fieldX == 7)
+		return PTMOD_STREAM_SUBCOLUMN_EFFECT;
+	if (fieldX == 8)
+		return PTMOD_STREAM_SUBCOLUMN_PARAM_HI;
+	if (fieldX == 9)
+		return PTMOD_STREAM_SUBCOLUMN_PARAM_LO;
+	return -1;
+}
+
+static int ptmodMouseCommands(GTOBJECT *gt)
+{
+	PTMOD_PREVIEW_STATS stats;
+	int rowCount;
+	int rowStart;
+	int chnWidth = getPatternChannelWidth();
+
+	(void)gt;
+	if (editorInfo.editmode != EDIT_MOD || !mouseb)
+		return 0;
+
+	ptmodplay_get_stats(&stats);
+	clampPtmodEditRow();
+	clampPtmodStreamCursor(&stats);
+
+	if (mousex >= PANEL_ORDER_X && mousex < PANEL_ORDER_X + getSidePanelWidth() &&
+		mousey >= PANEL_ORDER_Y - 1 && mousey <= TRANSPORT_BAR_Y + 2)
+	{
+		editorInfo.ptmodEditPage = 1;
+		rowCount = ptmodEditableRowCount();
+		if (ptmodState.valid && mousey >= PANEL_ORDER_Y + PTMOD_SETTINGS_FIRST_EDIT_ROW &&
+			mousey < PANEL_ORDER_Y + PTMOD_SETTINGS_FIRST_EDIT_ROW + rowCount)
+		{
+			editorInfo.ptmodEditRow = mousey - (PANEL_ORDER_Y + PTMOD_SETTINGS_FIRST_EDIT_ROW);
+			clampPtmodEditRow();
+			ptmodSelectOrderFromSideRow(&stats);
+			if (!prevmouseb && editorInfo.ptmodEditRow == PTMOD_SIDE_ROW_FOLLOW)
+			{
+				ptmodToggleFollowNow(&stats);
+			}
+		}
+		return 1;
+	}
+
+	if (mousex >= PATTERN_X && mousex < PATTERN_X + getPatternAreaWidth() &&
+		mousey >= PATTERN_Y && mousey <= PATTERN_Y + VISIBLEPATTROWS)
+	{
+		editorInfo.ptmodEditPage = 0;
+		if (!ptmodState.valid)
+			return 1;
+
+		rowStart = ptmodStreamDisplayRowStart(&stats);
+		if (mousey > PATTERN_Y)
+		{
+			int row = rowStart + (mousey - (PATTERN_Y + 1));
+			if (row < 0)
+				row = 0;
+			if (row >= PTMOD_ROWS)
+				row = PTMOD_ROWS - 1;
+			editorInfo.ptmodOrderIndex = ptmodEditorOrderIndex(&stats);
+			editorInfo.ptmodStreamRow = row;
+			editorInfo.ptmodStreamView = rowStart;
+			editorInfo.ptmodStreamFollow = 0;
+		}
+
+		if (mousex >= PATTERN_X + 5)
+		{
+			int channel = (mousex - (PATTERN_X + 4)) / chnWidth;
+			int fieldX = mousex - (PATTERN_X + 5 + channel * chnWidth);
+			int subColumn = ptmodSubColumnFromMouseX(fieldX);
+
+			if (channel >= 0 && channel < ptmodStreamChannelCount(&stats))
+				editorInfo.ptmodStreamChannel = channel;
+			if (subColumn >= 0)
+				ptmodSetStreamSubColumn(subColumn);
+			clampPtmodStreamCursor(&stats);
+			if (ctrlpressed && mousey > PATTERN_Y && !prevmouseb)
+			{
+				int orderIndex;
+				int pattern;
+				int row;
+				int markChannel;
+
+				ptmodCurrentPatternCursor(&stats, &orderIndex, &pattern, &row, &markChannel);
+				if (pattern >= 0)
+					ptmodSetBlockMark(orderIndex, pattern, row, markChannel, 0);
+			}
+		}
+		return 1;
+	}
+
+	return 1;
+}
+
+static void ptmodsettingscommands(GTOBJECT *gt)
+{
+	PTMOD_PREVIEW_STATS stats;
+	PTMOD_RUNTIME_SETTINGS runtimeSettings;
+	int handled = 0;
+
+	(void)gt;
+	ptmodplay_get_stats(&stats);
+	ptmodplay_get_runtime_settings(&runtimeSettings);
+	clampPtmodEditRow();
+	clampPtmodStreamCursor(&stats);
+
+	if (ptmodHandleSampleOctaveShortcut())
+	{
+		handled = 1;
+	}
+	else if (ptmodHandleFileKey(gt))
+	{
+		handled = 1;
+	}
+	else if (ptmodToggleFollow(&stats))
+	{
+		handled = 1;
+	}
+	else if (ptmodHandlePatternToolKey(&stats))
+	{
+		handled = 1;
+	}
+	else if (editorInfo.ptmodEditPage == 0 && ptmodEditNoteKey(&stats))
+	{
+		handled = 1;
+	}
+	else if (editorInfo.ptmodEditPage == 0 && ptmodEditStreamHex(&stats))
+	{
+		handled = 1;
+	}
+	else if (editorInfo.ptmodEditPage == 1 && ptmodEditSideText(&stats))
+	{
+		handled = 1;
+	}
+	else if (editorInfo.ptmodEditPage == 1 && ptmodEditSideHex(&stats))
+	{
+		handled = 1;
+	}
+	else if (editorInfo.ptmodEditPage == 1 && ptmodState.valid &&
+		(rawkey == KEY_ENTER || rawkey == KEY_SPACE))
+	{
+		int sampleBase = ptmodSideSampleBase(&stats);
+
+		if (editorInfo.ptmodEditRow >= sampleBase && editorInfo.ptmodEditRow <= sampleBase + 7)
+			handled = ptmodOpenSampleEditor(gt);
+	}
+	else if (ptmodHandleRuntimeKey(&stats, &runtimeSettings))
+	{
+		handled = 1;
+	}
+	else
+	{
+		if (editorInfo.ptmodEditPage == 0)
+		{
+			switch (rawkey)
+			{
+			case KEY_ENTER:
+			case KEY_SPACE:
+				if (editorInfo.ptmodStreamField == PTMOD_ROW_FIELD_EFFECT ||
+					editorInfo.ptmodStreamField == PTMOD_ROW_FIELD_PARAM)
+					handled = ptmodShowEffectTemplateMenu(gt, &stats);
+				break;
+			case KEY_UP:
+				if (ctrlpressed)
+					ptmodMoveOrder(&stats, -1);
+				else
+					ptmodMoveStreamRow(&stats, -1);
+				handled = 1;
+				break;
+			case KEY_DOWN:
+				if (ctrlpressed)
+					ptmodMoveOrder(&stats, 1);
+				else
+					ptmodMoveStreamRow(&stats, 1);
+				handled = 1;
+				break;
+			case KEY_PGUP:
+				ptmodMoveStreamRow(&stats, -PGUPDNREPEAT);
+				handled = 1;
+				break;
+			case KEY_PGDN:
+				ptmodMoveStreamRow(&stats, PGUPDNREPEAT);
+				handled = 1;
+				break;
+			case KEY_HOME:
+				editorInfo.ptmodEditPage = 0;
+				editorInfo.ptmodStreamFollow = 0;
+				editorInfo.ptmodOrderIndex = ptmodEditorOrderIndex(&stats);
+				editorInfo.ptmodStreamRow = 0;
+				clampPtmodStreamCursor(&stats);
+				handled = 1;
+				break;
+			case KEY_END:
+				editorInfo.ptmodEditPage = 0;
+				editorInfo.ptmodStreamFollow = 0;
+				editorInfo.ptmodOrderIndex = ptmodEditorOrderIndex(&stats);
+				editorInfo.ptmodStreamRow = ptmodStreamMaxRow(&stats);
+				clampPtmodStreamCursor(&stats);
+				handled = 1;
+				break;
+			case KEY_LEFT:
+				ptmodMoveStreamColumn(&stats, -1);
+				handled = 1;
+				break;
+			case KEY_RIGHT:
+				ptmodMoveStreamColumn(&stats, 1);
+				handled = 1;
+				break;
+			case KEY_BACKSPACE:
+			case KEY_DEL:
+				handled = ptmodClearStreamField(&stats);
+				break;
+			}
+		}
+	}
+
+	if (handled)
+		consumePtmodSettingsKey();
 }
 
 static int isDebugEnvEnabled(const char* name)
@@ -157,6 +3110,10 @@ char songfilename[MAX_PATHNAME];	// JP was MAX_FILENAME
 char wavfilter[MAX_FILENAME];
 char videofilter[MAX_FILENAME];
 char songfilter[MAX_FILENAME];
+char ptmodfilter[MAX_FILENAME];
+char ptmodfilename[MAX_PATHNAME];
+char ptmodsamplefilter[MAX_FILENAME];
+char ptmodsamplefilename[MAX_PATHNAME];
 char songpath[MAX_PATHNAME];
 char instrfilename[MAX_FILENAME];
 char instrfilter[MAX_FILENAME];
@@ -171,12 +3128,179 @@ char backupSngFilename[MAX_PATHNAME];
 char fkeysFilename[MAX_PATHNAME];
 
 extern char* notename[];
-char* programname = "$VER: GTUltra V1.5.4";
+char* programname = "$VER: GTUltraPro V2.0.0";
 char specialnotenames[186];
 char scalatuningfilepath[MAX_PATHNAME];
 char tuningname[64];
 
 char startPaletteName[MAX_PATHNAME];
+
+static const char *ptmodFilenameFromPath(const char *path)
+{
+	const char *slash;
+	const char *backslash;
+
+	if (!path)
+		return "";
+	slash = strrchr(path, '/');
+	backslash = strrchr(path, '\\');
+	if (backslash && (!slash || backslash > slash))
+		slash = backslash;
+	return slash ? slash + 1 : path;
+}
+
+static int ptmodPatternContentScore(int pattern)
+{
+	int row;
+	int channel;
+	int score = 0;
+
+	if (!ptmodState.valid || pattern < 0 || pattern >= ptmodState.patternCount)
+		return 0;
+	for (row = 0; row < PTMOD_ROWS; row++)
+	{
+		for (channel = 0; channel < PTMOD_CHANNELS; channel++)
+		{
+			PTMOD_CELL cell;
+
+			if (ptmod_get_pattern_cell(pattern, row, channel, &cell) &&
+				(cell.period || cell.sample))
+				score++;
+		}
+	}
+	return score;
+}
+
+static int ptmodInitialEditorOrder(void)
+{
+	int order;
+	int fallbackOrder = 0;
+	int fallbackScore = 0;
+
+	if (!ptmodState.valid || ptmodState.songLength <= 0)
+		return 0;
+	for (order = 0; order < ptmodState.songLength; order++)
+	{
+		int pattern = ptmod_order_pattern(order);
+		int score = ptmodPatternContentScore(pattern);
+
+		if (score > fallbackScore)
+		{
+			fallbackScore = score;
+			fallbackOrder = order;
+		}
+		if (score >= 8)
+			return order;
+	}
+	return fallbackOrder;
+}
+
+static void ptmodResetEditorPosition(void)
+{
+	editorInfo.ptmodOrderIndex = ptmodInitialEditorOrder();
+	editorInfo.ptmodStreamRow = 0;
+	editorInfo.ptmodStreamView = 0;
+	ptmodSetStreamSubColumn(PTMOD_STREAM_SUBCOLUMN_NOTE);
+	editorInfo.ptmodStreamFollow = 0;
+	editorInfo.ptmodEditPage = 0;
+	editorInfo.ptmodBlockActive = 0;
+	editorInfo.ptmodBlockOrder = 0;
+	editorInfo.ptmodBlockPattern = 0;
+	editorInfo.ptmodBlockRowStart = 0;
+	editorInfo.ptmodBlockRowEnd = 0;
+	editorInfo.ptmodBlockChannelStart = 0;
+	editorInfo.ptmodBlockChannelEnd = 0;
+	clampPtmodEditRow();
+}
+
+static int ptmodSaveAs(GTOBJECT *gt)
+{
+	char ptmodError[256];
+	char ptmodPath[MAX_PATHNAME];
+	const char *name;
+
+	if (!ptmodState.valid)
+	{
+		snprintf(infoTextBuffer, sizeof infoTextBuffer, "No valid MOD is loaded");
+		forceInfoLine = 1;
+		return 0;
+	}
+	if (!ptmodfilter[0])
+		strcpy(ptmodfilter, "*.mod");
+	name = ptmodFilenameFromPath(ptmodState.path);
+	if (name[0])
+		strncpy(ptmodfilename, name, sizeof ptmodfilename - 1);
+	else if (!ptmodfilename[0])
+		strcpy(ptmodfilename, "untitled.mod");
+	ptmodfilename[sizeof ptmodfilename - 1] = 0;
+
+	if (!fileselector(ptmodfilename, songpath, ptmodfilter, "SAVE MOD FILE", 3, gt, CEDIT, 1))
+		return 0;
+	if (!makeSelectorPath(ptmodPath, sizeof ptmodPath, songpath, ptmodfilename))
+	{
+		snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD path is too long");
+		forceInfoLine = 1;
+		return 0;
+	}
+	if (ptmod_save_as(ptmodPath, ptmodError, sizeof ptmodError))
+		snprintf(infoTextBuffer, sizeof infoTextBuffer, "%s", ptmod_status_text());
+	else
+		snprintf(infoTextBuffer, sizeof infoTextBuffer, "%s", ptmodError);
+	forceInfoLine = 1;
+	return !ptmod_is_dirty();
+}
+
+static int ptmodSaveCurrentOrAs(GTOBJECT *gt)
+{
+	char ptmodError[256];
+
+	if (!ptmodState.valid)
+	{
+		snprintf(infoTextBuffer, sizeof infoTextBuffer, "No valid MOD is loaded");
+		forceInfoLine = 1;
+		return 0;
+	}
+	if (!ptmod_has_path())
+		return ptmodSaveAs(gt);
+	if (ptmod_save_current(ptmodError, sizeof ptmodError))
+		snprintf(infoTextBuffer, sizeof infoTextBuffer, "%s", ptmod_status_text());
+	else
+		snprintf(infoTextBuffer, sizeof infoTextBuffer, "%s", ptmodError);
+	forceInfoLine = 1;
+	return !ptmod_is_dirty();
+}
+
+static int ptmodConfirmDiscard(GTOBJECT *gt, const char *action)
+{
+	char prompt[96];
+
+	if (!ptmod_is_dirty())
+		return 1;
+
+	snprintf(prompt, sizeof prompt, "Save MOD changes before %s? (y/n/esc)", action ? action : "continuing");
+	printtext(YES_NO_TEXT_X, YES_NO_TEXT_Y, getColor(CINFO_FOREGROUND, CGENERAL_BACKGROUND), prompt);
+	waitkey(gt);
+	printtext(YES_NO_TEXT_X, YES_NO_TEXT_Y, getColor(CINFO_FOREGROUND, CGENERAL_BACKGROUND),
+		"                                                ");
+	if (key == 'y' || key == 'Y')
+	{
+		int ok = ptmodSaveCurrentOrAs(gt);
+		key = 0;
+		rawkey = 0;
+		return ok;
+	}
+	if (key == 'n' || key == 'N')
+	{
+		key = 0;
+		rawkey = 0;
+		return 1;
+	}
+	snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD %s cancelled", action ? action : "operation");
+	forceInfoLine = 1;
+	key = 0;
+	rawkey = 0;
+	return 0;
+}
 
 
 char debugTextbuffer[MAX_PATHNAME];
@@ -363,7 +3487,7 @@ int main(int argc, char** argv)
 	// Open datafile
 	if (!io_openlinkeddatafile(datafile))
 	{
-		showStartupError("Could not open the linked GTUltra datafile.");
+		showStartupError("Could not open the linked GTUltraPro datafile.");
 		return 1;
 	}
 
@@ -857,7 +3981,7 @@ int main(int argc, char** argv)
 	// Set screenmode
 	if (!initscreen())
 	{
-		snprintf(textbuffer, sizeof textbuffer, "Could not initialize the GTUltra screen: %s", SDL_GetError());
+		snprintf(textbuffer, sizeof textbuffer, "Could not initialize the GTUltraPro screen: %s", SDL_GetError());
 		showStartupError(textbuffer);
 		return 1;
 	}
@@ -1577,10 +4701,14 @@ void docommand(void)
 		calculateTotalInstrumentsFromAllPatterns();
 		break;
 
-	case EDIT_NAMES:
-		namecommands(gt);
-		break;
-	}
+		case EDIT_NAMES:
+			namecommands(gt);
+			break;
+
+		case EDIT_MOD:
+			ptmodsettingscommands(gt);
+			break;
+		}
 
 
 
@@ -1611,6 +4739,9 @@ void mousecommands(GTOBJECT* gt)
 	}
 
 	if (mouseTransportBar(gt))
+		return;
+
+	if (ptmodMouseCommands(gt))
 		return;
 
 	/*
@@ -2256,7 +5387,47 @@ void generalcommands(GTOBJECT* gt)
 		if (!ctrlpressed) break;
 
 		if (!editPaletteMode)
-			undoPerform(gt);
+		{
+			if (editorInfo.editmode == EDIT_MOD)
+			{
+				char ptmodError[256];
+				PTMOD_PREVIEW_STATS stats;
+
+				if ((shiftpressed ? ptmod_redo(ptmodError, sizeof ptmodError) :
+					ptmod_undo(ptmodError, sizeof ptmodError)))
+				{
+					ptmodplay_get_stats(&stats);
+					clampPtmodEditRow();
+					clampPtmodStreamCursor(&stats);
+				}
+				snprintf(infoTextBuffer, sizeof infoTextBuffer, "%s",
+					ptmodError[0] ? ptmodError :
+					(shiftpressed ? "No MOD redo is available" : "No MOD undo is available"));
+				forceInfoLine = 1;
+			}
+			else
+			{
+				undoPerform(gt);
+			}
+		}
+		return;
+
+	case KEY_Y:
+		if (!ctrlpressed || editPaletteMode || editorInfo.editmode != EDIT_MOD) break;
+		{
+			char ptmodError[256];
+			PTMOD_PREVIEW_STATS stats;
+
+			if (ptmod_redo(ptmodError, sizeof ptmodError))
+			{
+				ptmodplay_get_stats(&stats);
+				clampPtmodEditRow();
+				clampPtmodStreamCursor(&stats);
+			}
+			snprintf(infoTextBuffer, sizeof infoTextBuffer, "%s",
+				ptmodError[0] ? ptmodError : "No MOD redo is available");
+			forceInfoLine = 1;
+		}
 		return;
 
 	case KEY_F12:
@@ -2279,14 +5450,14 @@ void generalcommands(GTOBJECT* gt)
 		break;
 	}
 
-	case KEY_TAB:
-		if (!shiftOrCtrlPressed) editorInfo.editmode++;
-		else editorInfo.editmode--;
-		if (editorInfo.editmode > EDIT_NAMES) editorInfo.editmode = EDIT_PATTERN;
-		if (editorInfo.editmode < EDIT_PATTERN) editorInfo.editmode = EDIT_NAMES;
+		case KEY_TAB:
+			if (!shiftOrCtrlPressed) editorInfo.editmode++;
+			else editorInfo.editmode--;
+			if (editorInfo.editmode > EDIT_MOD) editorInfo.editmode = EDIT_PATTERN;
+			if (editorInfo.editmode < EDIT_PATTERN) editorInfo.editmode = EDIT_MOD;
 
-		setMasterLoopChannel(gt, "debug_8");
-		break;
+			setMasterLoopChannel(gt, "debug_8");
+			break;
 
 	case KEY_F1:
 		if (editPaletteMode)
@@ -2323,6 +5494,11 @@ void generalcommands(GTOBJECT* gt)
 
 		if (editPaletteMode)
 			break;
+		if (editorInfo.editmode == EDIT_MOD && !shiftOrCtrlPressed)
+		{
+			ptmodPlayFromCursor(gt, 1);
+			break;
+		}
 
 		// in SIDTracker mode, just use F2 for playing current position
 		if (SIDTracker64ForIPadIsAmazing != 0)
@@ -2368,6 +5544,11 @@ void generalcommands(GTOBJECT* gt)
 
 		if (editPaletteMode)
 			break;
+		if (editorInfo.editmode == EDIT_MOD && !shiftOrCtrlPressed)
+		{
+			ptmodPlayFromCursor(gt, 0);
+			break;
+		}
 
 		// ORIGINAL GT: LOOP PATTERN, PLAYING FROM SELECTED
 		if (useOriginalGTFunctionKeys && SIDTracker64ForIPadIsAmazing == 0)
@@ -2445,7 +5626,23 @@ void generalcommands(GTOBJECT* gt)
 		break;
 
 	case KEY_F8:
-		if (!shiftOrCtrlPressed)
+		if (shiftpressed && ctrlpressed)
+		{
+			PTMOD_PREVIEW_STATS stats;
+
+			ptmodplay_get_stats(&stats);
+			editorInfo.editmode = EDIT_MOD;
+			if (stats.loaded && stats.active)
+			{
+				editorInfo.ptmodStreamFollow = 1;
+				editorInfo.ptmodOrderIndex = stats.orderIndex;
+				editorInfo.ptmodStreamRow = stats.row;
+			}
+			disableEnterToReturnToLastPos = 1;
+			snprintf(infoTextBuffer, sizeof infoTextBuffer, "%s", ptmod_status_text());
+			forceInfoLine = 1;
+		}
+		else if (!shiftOrCtrlPressed)
 		{
 			editorInfo.editmode = EDIT_TABLES;		// 'Cos JAMMAR SAID SO!
 			disableEnterToReturnToLastPos = 1;
@@ -2458,7 +5655,29 @@ void generalcommands(GTOBJECT* gt)
 		break;
 
 	case KEY_F9:
-		if (!shiftOrCtrlPressed)
+		if (shiftpressed && ctrlpressed)
+		{
+			char ptmodError[256];
+			char ptmodPath[MAX_PATHNAME];
+			if (!ptmodConfirmDiscard(gt, "load"))
+				break;
+			if (!ptmodfilter[0])
+				strcpy(ptmodfilter, "*.mod");
+			if (fileselector(ptmodfilename, songpath, ptmodfilter, "LOAD MOD FILE", 0, gt, CEDIT, 0))
+			{
+				if (!makeSelectorPath(ptmodPath, sizeof ptmodPath, songpath, ptmodfilename))
+					snprintf(infoTextBuffer, sizeof infoTextBuffer, "MOD path is too long");
+				else if (ptmod_load_source(ptmodPath, ptmodError, sizeof ptmodError))
+				{
+					ptmodResetEditorPosition();
+					snprintf(infoTextBuffer, sizeof infoTextBuffer, "%s", ptmod_status_text());
+				}
+				else
+					snprintf(infoTextBuffer, sizeof infoTextBuffer, "%s", ptmodError);
+				forceInfoLine = 1;
+			}
+		}
+		else if (!shiftOrCtrlPressed)
 		{
 			if (editorInfo.expandOrderListView)
 			{
@@ -2513,6 +5732,14 @@ void generalcommands(GTOBJECT* gt)
 		break;
 
 	case KEY_F11:
+		if (editorInfo.editmode == EDIT_MOD && !ctrlpressed)
+		{
+			if (shiftpressed)
+				ptmodSaveAs(gt);
+			else
+				ptmodSaveCurrentOrAs(gt);
+			break;
+		}
 		if (shiftOrCtrlPressed)
 			save(gt, 1);
 		else
@@ -2941,7 +6168,45 @@ void editadsr(GTOBJECT* gt)
 
 		case KEY_Z:
 			if (!ctrlpressed) break;
-			undoPerform(gt);
+			if (editorInfo.editmode == EDIT_MOD)
+			{
+				char ptmodError[256];
+				PTMOD_PREVIEW_STATS stats;
+
+				if ((shiftpressed ? ptmod_redo(ptmodError, sizeof ptmodError) :
+					ptmod_undo(ptmodError, sizeof ptmodError)))
+				{
+					ptmodplay_get_stats(&stats);
+					clampPtmodEditRow();
+					clampPtmodStreamCursor(&stats);
+				}
+				snprintf(infoTextBuffer, sizeof infoTextBuffer, "%s",
+					ptmodError[0] ? ptmodError :
+					(shiftpressed ? "No MOD redo is available" : "No MOD undo is available"));
+				forceInfoLine = 1;
+			}
+			else
+			{
+				undoPerform(gt);
+			}
+			break;
+
+		case KEY_Y:
+			if (!ctrlpressed || editorInfo.editmode != EDIT_MOD) break;
+			{
+				char ptmodError[256];
+				PTMOD_PREVIEW_STATS stats;
+
+				if (ptmod_redo(ptmodError, sizeof ptmodError))
+				{
+					ptmodplay_get_stats(&stats);
+					clampPtmodEditRow();
+					clampPtmodStreamCursor(&stats);
+				}
+				snprintf(infoTextBuffer, sizeof infoTextBuffer, "%s",
+					ptmodError[0] ? ptmodError : "No MOD redo is available");
+				forceInfoLine = 1;
+			}
 			break;
 
 		case KEY_F7:
@@ -3840,7 +7105,11 @@ int mouseTransportBar(GTOBJECT* gt)
 	{
 		if (shiftOrCtrlPressed)
 		{
+			if (editorInfo.editmode == EDIT_MOD)
+				return ptmodToggleSelectedLoopFromMod(gt);
 			transportLoopPatternSelectArea = 1 - transportLoopPatternSelectArea;
+			if (!transportLoopPatternSelectArea)
+				ptmodplay_set_loop_range(0, 0, 0, 0, 0);
 			if (transportLoopPatternSelectArea)
 				sprintf(infoTextBuffer, "Selected pattern area looping: Enabled");
 			else
@@ -3877,7 +7146,7 @@ int mouseTransportBar(GTOBJECT* gt)
 			if (useOriginalGTFunctionKeys)
 				sprintf(infoTextBuffer, "Use Original GT F1, F2 and F3 keys");
 			else
-				sprintf(infoTextBuffer, "Use GTUltra F1, F2 and F3 keys");
+				sprintf(infoTextBuffer, "Use GTUltraPro F1, F2 and F3 keys");
 			forceInfoLine = 1;
 		}
 		else
@@ -3911,6 +7180,14 @@ int mouseTransportBar(GTOBJECT* gt)
 	{
 		if (editPaletteMode)
 			return 1;
+		if (editorInfo.editmode == EDIT_MOD)
+		{
+			PTMOD_PREVIEW_STATS stats;
+
+			ptmodplay_get_stats(&stats);
+			ptmodToggleFollowNow(&stats);
+			return 1;
+		}
 
 		nextSongPos(&gtObject);
 		return 1;
@@ -4370,6 +7647,8 @@ void playFromCurrentPosition(GTOBJECT* gt, int currentPos)
 	gt->interPatternLoopEnabledFlag = 0;
 	int c2 = getActualChannel(editorInfo.esnum, editorInfo.epchn);
 	handleShiftSpace(gt, c2, currentPos * 4, 0, 1);
+	if (gt == &gtObject)
+		ptmodplay_start_at(editorInfo.eseditpos, currentPos);
 
 	gt->loopEnabledFlag = t3;	//transportLoopPattern;
 	gt->interPatternLoopEnabledFlag = t2;
@@ -5274,7 +8553,7 @@ void saveBackupSong()
 	time_str[strlen(time_str) - 1] = '\0';
 	replacechar(time_str, ':', '_');
 
-	int result = snprintf(backupSngFilename, sizeof backupSngFilename, "%s/GTUltra_%s.sng", backupFolderName, time_str);
+	int result = snprintf(backupSngFilename, sizeof backupSngFilename, "%s/GTUltraPro_%s.sng", backupFolderName, time_str);
 	if ((result < 0) || (result >= (int)sizeof backupSngFilename))
 	{
 		SDL_Log("Backup filename is too long; skipping backup save.\n");

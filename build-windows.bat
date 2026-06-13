@@ -24,6 +24,8 @@ set "ROOT=%~dp0"
 set "SRC_DIR=%ROOT%src"
 set "BME_DIR=%SRC_DIR%\bme"
 set "OUT_DIR=%ROOT%build\windows"
+if "%GTULTRA_VIDEO%"=="" set "GTULTRA_VIDEO=1"
+if "%GTULTRA_LIBXMP%"=="" set "GTULTRA_LIBXMP=1"
 
 set "MAKE_CMD=%MAKE%"
 if "%MAKE_CMD%"=="" call :find_tool mingw32-make MAKE_CMD
@@ -45,6 +47,10 @@ if "%GTULTRA_VIDEO%"=="1" (
         exit /b 1
     )
 )
+if "%GTULTRA_LIBXMP%"=="1" if not exist "%ROOT%3rdparty\libxmp\include\xmp.h" (
+    echo error: vendored libxmp was not found at 3rdparty\libxmp. 1>&2
+    exit /b 1
+)
 
 if /I "%TARGET%"=="clean" goto clean
 
@@ -61,11 +67,11 @@ pushd "%SRC_DIR%" || exit /b 1
 if not "%SDL2_PREFIX%"=="" (
     set "SDL_LIBS=-L%SDL2_PREFIX%\lib -lmingw32 -mwindows -lSDL2main -lSDL2 -lwinmm -lsetupapi -lole32 -loleaut32 -limm32 -lversion -lcfgmgr32 -static-libstdc++ -static-libgcc -static"
     if "%GTULTRA_VIDEO%"=="1" set "SDL_LIBS=-L%SDL2_PREFIX%\lib -lmingw32 -mwindows -lSDL2main -lSDL2 -lwinmm -lsetupapi -lole32 -loleaut32 -limm32 -lversion -lcfgmgr32 -static-libstdc++ -static-libgcc"
-    "%MAKE_CMD%" -f makefile.win PREFIX=../build/windows/ DATAFILE=./bme/datafile.exe DAT2INC=./bme/dat2inc.exe GTULTRA_VIDEO=%GTULTRA_VIDEO% "CFLAGS=-std=gnu17 -Ibme -Iasm -O3 -Wall" "LIBS=%SDL_LIBS%"
+    "%MAKE_CMD%" -f makefile.win PREFIX=../build/windows/ DATAFILE=./bme/datafile.exe DAT2INC=./bme/dat2inc.exe GTULTRA_VIDEO=%GTULTRA_VIDEO% GTULTRA_LIBXMP=%GTULTRA_LIBXMP% "CFLAGS=-std=gnu17 -Ibme -Iasm -O3 -Wall" "LIBS=%SDL_LIBS%"
 ) else (
     set "SDL_LIBS=-lmingw32 -mwindows -lSDL2main -lSDL2 -lwinmm -lsetupapi -lole32 -loleaut32 -limm32 -lversion -lcfgmgr32 -static-libstdc++ -static-libgcc -static"
     if "%GTULTRA_VIDEO%"=="1" set "SDL_LIBS=-lmingw32 -mwindows -lSDL2main -lSDL2 -lwinmm -lsetupapi -lole32 -loleaut32 -limm32 -lversion -lcfgmgr32 -static-libstdc++ -static-libgcc"
-    "%MAKE_CMD%" -f makefile.win PREFIX=../build/windows/ DATAFILE=./bme/datafile.exe DAT2INC=./bme/dat2inc.exe GTULTRA_VIDEO=%GTULTRA_VIDEO% "CFLAGS=-std=gnu17 -Ibme -Iasm -O3 -Wall" "LIBS=%SDL_LIBS%"
+    "%MAKE_CMD%" -f makefile.win PREFIX=../build/windows/ DATAFILE=./bme/datafile.exe DAT2INC=./bme/dat2inc.exe GTULTRA_VIDEO=%GTULTRA_VIDEO% GTULTRA_LIBXMP=%GTULTRA_LIBXMP% "CFLAGS=-std=gnu17 -Ibme -Iasm -O3 -Wall" "LIBS=%SDL_LIBS%"
 )
 if errorlevel 1 exit /b 1
 popd
@@ -160,14 +166,20 @@ echo Requirements:
 echo   - MSYS2 MinGW or another MinGW-w64 toolchain on PATH
 echo   - GNU make, gcc, g++, windres, strip
 echo   - SDL2 MinGW development libraries
-echo   - Optional MP4 video support: FFmpeg development libraries and pkg-config
+echo   - FFmpeg development libraries and pkg-config for default MP4 video support
+echo   - Vendored 3rdparty\libxmp for default ProTracker MOD audio preview
 echo.
 echo If SDL2 is not on the default MinGW library path, set SDL2_PREFIX first:
 echo   set SDL2_PREFIX=C:\msys64\mingw64
 echo.
-echo To build optional muted MP4 video support:
-echo   set GTULTRA_VIDEO=1
+echo To build without muted MP4 video support:
+echo   set GTULTRA_VIDEO=0
+echo.
+echo To refresh FFmpeg runtime DLLs from an MSYS2 package:
 echo   set FFMPEG_PREFIX=C:\msys64\ucrt64
+echo.
+echo To build without ProTracker MOD audio preview:
+echo   set GTULTRA_LIBXMP=0
 exit /b 0
 
 :bad_args

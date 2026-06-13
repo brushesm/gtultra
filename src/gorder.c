@@ -5,6 +5,7 @@
 #define GORDER_C
 
 #include "goattrk2.h"
+#include "gmodplay.h"
 
 unsigned char trackcopybuffer[MAX_SONGLEN + 2];
 int trackcopyrows = 0;
@@ -1383,6 +1384,8 @@ void orderPlayFromPosition(GTOBJECT *gt, int startPatternPos, int startSongPos, 
 	gt->loopEnabledFlag = loopMode;
 	gt->disableLoopSearch = 0;
 	gt->interPatternLoopEnabledFlag = t2;
+	if (gt == &gtObject)
+		ptmodplay_start_at(startSongPos, startPatternPos / 4);
 
 }
 

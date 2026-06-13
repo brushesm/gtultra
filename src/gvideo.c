@@ -444,7 +444,7 @@ int gt_video_load(const char *path)
 		goto fail;
 
 	initial_window_size(&windowW, &windowH);
-	video.window = SDL_CreateWindow("GTUltra Video",
+	video.window = SDL_CreateWindow("GTUltraPro Video",
 		SDL_WINDOWPOS_UNDEFINED,
 		SDL_WINDOWPOS_UNDEFINED,
 		windowW,

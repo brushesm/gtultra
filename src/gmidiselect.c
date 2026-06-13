@@ -91,7 +91,7 @@ void displayMIDISelectWindow()
 		printtext(boxX + 2, boxY + 3, getColor(boxColor, 0), "Port     Name");
 
 		printtext(boxX + 2, boxY + 17, getColor(boxColor, 0), "Up/Down to highlight.");	// Enter to select.Esc to cancel");
-		printtext(boxX + 2, boxY + 18, getColor(boxColor, 0), "Quit and restart GTUltra for changes to take effect");
+		printtext(boxX + 2, boxY + 18, getColor(boxColor, 0), "Quit and restart GTUltraPro for changes to take effect");
 		for (int i = 0;i < 10;i++)
 		{
 			int color = CNORMAL;
@@ -126,4 +126,3 @@ void displayMIDISelectWindow()
 
 	}
 }
-

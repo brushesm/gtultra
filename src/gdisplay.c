@@ -5,6 +5,7 @@
 #define GDISPLAY_C
 
 #include "goattrk2.h"
+#include "gmodplay.h"
 
 char *notename[] =
 { "C-0", "C#0", "D-0", "D#0", "E-0", "F-0", "F#0", "G-0", "G#0", "A-0", "A#0", "B-0",
@@ -33,6 +34,9 @@ char *notenameTableView[] =
 
 
 char timechar[] = { ':', ' ' };
+
+static void displayPtmodSettings(int cc, int OX, int OY);
+static void displayPtmodPatternView(GTOBJECT *gt);
 
 static int colorWithForeground(int color, int foreground)
 {
@@ -241,19 +245,26 @@ void printstatus(GTOBJECT *gt)
 	printtext(PANEL_ORDER_X, PANEL_ORDER_Y - 1, lockPatternColor, textbuffer);
 
 
-	if (editorInfo.expandOrderListView == 0)	// display original orderlist + instrument information
+	if (editorInfo.editmode == EDIT_MOD)
 	{
-		displayOrderList(gt, cc, PANEL_ORDER_X, PANEL_ORDER_Y);
+		displayPtmodSettings(cc, PANEL_ORDER_X, PANEL_ORDER_Y);
 	}
 	else
 	{
-		displayExpandedOrderList(gt, cc, PANEL_ORDER_X, PANEL_ORDER_Y);
+		if (editorInfo.expandOrderListView == 0)	// display original orderlist + instrument information
+		{
+			displayOrderList(gt, cc, PANEL_ORDER_X, PANEL_ORDER_Y);
+		}
+		else
+		{
+			displayExpandedOrderList(gt, cc, PANEL_ORDER_X, PANEL_ORDER_Y);
+		}
+
+		displayInstrument(gt, cc, PANEL_INSTR_X, PANEL_INSTR_Y);
+
+		displayTables(PANEL_TABLES_X, PANEL_TABLES_Y);
+		displaySongInfo(cc, PANEL_NAMES_X, PANEL_NAMES_Y);
 	}
-
-	displayInstrument(gt, cc, PANEL_INSTR_X, PANEL_INSTR_Y);
-
-	displayTables(PANEL_TABLES_X, PANEL_TABLES_Y);
-	displaySongInfo(cc, PANEL_NAMES_X, PANEL_NAMES_Y);
 
 	/*
 		switch (autoadvance)
@@ -562,6 +573,45 @@ int getVisibleChannelCount(void)
 	return 12;
 }
 
+static int getPtmodPatternChannelCount(void)
+{
+	PTMOD_PREVIEW_STATS stats;
+
+	ptmodplay_get_stats(&stats);
+	if (!stats.loaded || stats.channels <= 0)
+		return 0;
+	if (stats.channels > PTMOD_MAX_PREVIEW_CHANNELS)
+		return PTMOD_MAX_PREVIEW_CHANNELS;
+	return stats.channels;
+}
+
+static int isPtmodPatternView(void)
+{
+	return editorInfo.editmode == EDIT_MOD;
+}
+
+static int getPtmodPatternViewChannelCount(void)
+{
+	int channels = getPtmodPatternChannelCount();
+
+	return channels > 0 ? channels : 4;
+}
+
+static int getPtmodPatternViewChannelWidth(void)
+{
+	return 21;
+}
+
+static int getPtmodPatternViewAreaWidth(void)
+{
+	return 5 + getPtmodPatternViewChannelCount() * getPtmodPatternViewChannelWidth();
+}
+
+static int getPatternDisplayChannelCount(void)
+{
+	return getVisibleChannelCount() + getPtmodPatternChannelCount();
+}
+
 int getEditorVisualPatternChannel(void)
 {
 	if (editorInfo.maxSIDChannels > 6)
@@ -617,12 +667,16 @@ void setEditorVisualOrderChannel(int visualChannel)
 
 int getPatternChannelWidth(void)
 {
-	return getVisibleChannelCount() == 3 ? 14 : 9;
+	if (isPtmodPatternView())
+		return getPtmodPatternViewChannelWidth();
+	return getPatternDisplayChannelCount() == 3 ? 14 : 9;
 }
 
 int getPatternAreaWidth(void)
 {
-	return 5 + getVisibleChannelCount() * getPatternChannelWidth();
+	if (isPtmodPatternView())
+		return getPtmodPatternViewAreaWidth();
+	return 5 + getPatternDisplayChannelCount() * getPatternChannelWidth();
 }
 
 int getSidePanelWidth(void)
@@ -659,6 +713,13 @@ void displayPattern(GTOBJECT *gt)
 	//	sprintf(textbuffer, "ticks:%2d/%2d ", debugTicks, maxDebugTicks);
 	//	printtext(61, 1, 0xe, textbuffer);
 
+	if (isPtmodPatternView())
+	{
+		displayPtmodPatternView(gt);
+		displayOriginal3Channel = 0;
+		return;
+	}
+
 	int maxChan = getVisibleChannelCount();
 
 	if (maxChan != lastDisplayChanCount)	// clear pattern display area if swapping between 3/6 channel views
@@ -683,12 +744,323 @@ void displayPattern(GTOBJECT *gt)
 	}
 }
 
+static int getPtmodPatternRowColor(int p)
+{
+	int color = getColor(CPATTERN_FOREGROUND1, CPATTERN_BACKGROUND1);
+
+	if ((p % (stepsize * 2)) < stepsize)
+	{
+		if ((p % stepsize) == 0)
+			color = getColor(CPATTERN_FIRST_FOREGROUND2, CPATTERN_FIRST_BACKGROUND2);
+		else
+			color = getColor(CPATTERN_FOREGROUND2, CPATTERN_BACKGROUND2);
+	}
+	else if ((p % stepsize) == 0)
+	{
+		color = getColor(CPATTERN_FIRST_FOREGROUND1, CPATTERN_FIRST_BACKGROUND1);
+	}
+
+	return color;
+}
+
+static void formatPtmodPeriodNote(int period, char *dest, size_t destSize)
+{
+	static const char *protrackerNotes[] = {
+		"C-1", "C#1", "D-1", "D#1", "E-1", "F-1", "F#1", "G-1", "G#1", "A-1", "A#1", "B-1",
+		"C-2", "C#2", "D-2", "D#2", "E-2", "F-2", "F#2", "G-2", "G#2", "A-2", "A#2", "B-2",
+		"C-3", "C#3", "D-3", "D#3", "E-3", "F-3", "F#3", "G-3", "G#3", "A-3", "A#3", "B-3"
+	};
+	static const int protrackerPeriods[] = {
+		856, 808, 762, 720, 678, 640, 604, 570, 538, 508, 480, 453,
+		428, 404, 381, 360, 339, 320, 302, 285, 269, 254, 240, 226,
+		214, 202, 190, 180, 170, 160, 151, 143, 135, 127, 120, 113
+	};
+	int bestIndex = 0;
+	int bestDistance = 0x7fffffff;
+
+	if (!dest || destSize == 0)
+		return;
+
+	if (period <= 0)
+	{
+		snprintf(dest, destSize, "---");
+		return;
+	}
+
+	for (size_t i = 0; i < sizeof protrackerPeriods / sizeof protrackerPeriods[0]; i++)
+	{
+		int distance = period > protrackerPeriods[i] ? period - protrackerPeriods[i] : protrackerPeriods[i] - period;
+		if (distance < bestDistance)
+		{
+			bestDistance = distance;
+			bestIndex = (int)i;
+		}
+	}
+
+	if (bestDistance)
+		snprintf(dest, destSize, "???");
+	else
+		snprintf(dest, destSize, "%s", protrackerNotes[bestIndex]);
+}
+
+static void formatPtmodCell(const PTMOD_CELL *cell, char *dest, size_t destSize)
+{
+	char noteText[8];
+	char sampleText[4];
+	char effectText[4];
+
+	if (!dest || destSize == 0)
+		return;
+	if (!cell)
+	{
+		snprintf(dest, destSize, "%10s", "");
+		return;
+	}
+
+	formatPtmodPeriodNote(cell->period, noteText, sizeof noteText);
+	if (cell->sample)
+		snprintf(sampleText, sizeof sampleText, "%02X", cell->sample & 0xff);
+	else
+		snprintf(sampleText, sizeof sampleText, "..");
+	if (cell->effect || cell->param)
+		snprintf(effectText, sizeof effectText, "%01X%02X", cell->effect & 0x0f, cell->param & 0xff);
+	else
+		snprintf(effectText, sizeof effectText, "...");
+
+	snprintf(dest, destSize, "%3s %2s %3s", noteText, sampleText, effectText);
+}
+
+static int clampPtmodOrderForDisplay(const PTMOD_PREVIEW_STATS *stats, int orderIndex)
+{
+	int maxOrder = 0;
+
+	(void)stats;
+	if (ptmodState.valid && ptmodState.songLength > 0)
+		maxOrder = ptmodState.songLength - 1;
+	if (orderIndex < 0)
+		orderIndex = 0;
+	if (orderIndex > maxOrder)
+		orderIndex = maxOrder;
+	return orderIndex;
+}
+
+static int getPtmodDisplayOrder(const PTMOD_PREVIEW_STATS *stats)
+{
+	if (stats && stats->loaded && stats->active && editorInfo.ptmodStreamFollow)
+		return clampPtmodOrderForDisplay(stats, stats->orderIndex);
+	return clampPtmodOrderForDisplay(stats, editorInfo.ptmodOrderIndex);
+}
+
+static int getPtmodDisplayRow(const PTMOD_PREVIEW_STATS *stats)
+{
+	int row;
+
+	if (stats && stats->loaded && stats->active && editorInfo.ptmodStreamFollow)
+		row = stats->row;
+	else
+		row = editorInfo.ptmodStreamRow;
+	if (row < 0)
+		row = 0;
+	if (row >= PTMOD_ROWS)
+		row = PTMOD_ROWS - 1;
+	return row;
+}
+
+static void displayPtmodPatternView(GTOBJECT *gt)
+{
+	PTMOD_PREVIEW_STATS stats;
+	PTMOD_RUNTIME_SETTINGS runtimeSettings;
+	int channels;
+	int chnWidth = getPtmodPatternViewChannelWidth();
+	int patternWidth = getPtmodPatternViewAreaWidth();
+	int clearWidth = getSidePanelX() - PATTERN_X - 1;
+	int mutedColor = getColor(CUNUSED_MUTED_FOREGROUND, CUNUSED_MUTED_BACKGROUND);
+	int titleColor = getColor(CTITLES_FOREGROUND, CTRANSPORT_FOREGROUND);
+	int dividerColor = getColor(CPATTERN_DIVIDER_LINE, CUNUSED_MUTED_BACKGROUND);
+	int rowStart;
+	int cursorRow;
+	int maxRowStart;
+	int orderIndex;
+	int pattern;
+	char title[160];
+
+	(void)gt;
+	ptmodplay_get_stats(&stats);
+	ptmodplay_get_runtime_settings(&runtimeSettings);
+	channels = getPtmodPatternViewChannelCount();
+
+	if (clearWidth < patternWidth)
+		clearWidth = patternWidth;
+	if (PATTERN_X + clearWidth > MAX_COLUMNS)
+		clearWidth = MAX_COLUMNS - PATTERN_X;
+
+	fillArea(PATTERN_X, PATTERN_Y - 1, clearWidth, VISIBLEPATTROWS + 2, mutedColor, ' ');
+	printbyterow(PATTERN_X, PATTERN_Y - 1, getColor(CTRANSPORT_FOREGROUND, CTRANSPORT_FOREGROUND), 0x20, clearWidth);
+	printbytecol(PATTERN_X + patternWidth - 1, PATTERN_Y - 1, getColor(CGENERAL_HIGHLIGHT, CGENERAL_BACKGROUND), 0x1f5, VISIBLEPATTROWS + 2);
+
+	if (!stats.loaded)
+	{
+		printtext(PATTERN_X, PATTERN_Y, titleColor, "MOD PATTERN");
+		printtext(PATTERN_X + 1, PATTERN_Y + 2, mutedColor, "No ProTracker MOD loaded");
+		lastDisplayChanCount = -1;
+		return;
+	}
+
+	orderIndex = getPtmodDisplayOrder(&stats);
+	pattern = ptmod_order_pattern(orderIndex);
+	cursorRow = getPtmodDisplayRow(&stats);
+	maxRowStart = PTMOD_ROWS > VISIBLEPATTROWS ? PTMOD_ROWS - VISIBLEPATTROWS : 0;
+	if (cursorRow < 0)
+		cursorRow = 0;
+	if (cursorRow >= PTMOD_ROWS)
+		cursorRow = PTMOD_ROWS - 1;
+
+	if (editorInfo.ptmodStreamFollow && stats.active)
+	{
+		rowStart = cursorRow - VISIBLEPATTROWS / 2;
+		if (rowStart < 0)
+			rowStart = 0;
+	}
+	else
+	{
+		rowStart = editorInfo.ptmodStreamView;
+		if (cursorRow < rowStart)
+			rowStart = cursorRow;
+		if (cursorRow >= rowStart + VISIBLEPATTROWS)
+			rowStart = cursorRow - VISIBLEPATTROWS + 1;
+	}
+	if (rowStart > maxRowStart)
+		rowStart = maxRowStart;
+	if (rowStart < 0)
+		rowStart = 0;
+
+	snprintf(title, sizeof title, "MOD PATTERN%s  ORD:%02d/%02d PAT:%02X ROW:%02X  PLAY:%02d:%02X DEL:%d FOLLOW:%s",
+		editorInfo.ptmodEditPage == 0 ? "*" : " ",
+		orderIndex,
+		stats.songLength > 0 ? stats.songLength - 1 : 0,
+		pattern < 0 ? 0 : pattern,
+		cursorRow,
+		stats.orderIndex,
+		stats.row,
+		stats.delayFramesRemaining,
+		editorInfo.ptmodStreamFollow ? "ON" : "OFF");
+	snprintf(textbuffer, sizeof textbuffer, "%-*.*s", clearWidth, clearWidth, title);
+	printtext(PATTERN_X, PATTERN_Y - 1, getColor(CINFO_FOREGROUND, CTRANSPORT_FOREGROUND), textbuffer);
+
+	printtext(PATTERN_X, PATTERN_Y, titleColor, " ROW");
+	for (int c = 0; c < channels; c++)
+	{
+		int x = PATTERN_X + 4 + c * chnWidth;
+		int headerColor = runtimeSettings.channelMute[c] ? getColor(CUNUSED_MUTED_FOREGROUND, CTRANSPORT_FOREGROUND) : titleColor;
+
+		printbyte(x, PATTERN_Y, dividerColor, 0x1ff);
+		snprintf(textbuffer, sizeof textbuffer, "CH%d NOTE SM FX", c + 1);
+		printtext(x + 1, PATTERN_Y, headerColor, textbuffer);
+	}
+
+	for (int d = 0; d < VISIBLEPATTROWS; d++)
+	{
+		int p = rowStart + d;
+		int rowColor = getPtmodPatternRowColor(p);
+		int indexColor = rowColor & 0xff00;
+
+		if (p < 0 || p >= PTMOD_ROWS)
+		{
+			indexColor = mutedColor;
+			sprintf(textbuffer, "   ");
+		}
+		else
+		{
+			indexColor = colorWithReadableForeground(indexColor, (p % stepsize) == 0 ? CPATTERN_INDEX_HIGHLIGHT : CPATTERN_NOTE_FOREGROUND);
+			if (!(patterndispmode & 1))
+				sprintf(textbuffer, " %02d", p);
+			else
+				sprintf(textbuffer, " %02X", p & 0xff);
+		}
+
+		printbyte(PATTERN_X, PATTERN_Y + 1 + d, indexColor, 0x20);
+		printtext(PATTERN_X + 1, PATTERN_Y + 1 + d, indexColor, textbuffer);
+
+		for (int c = 0; c < channels; c++)
+		{
+			PTMOD_CELL cell;
+			int x = PATTERN_X + 4 + c * chnWidth;
+			int cellColor = rowColor;
+			int muted = !runtimeSettings.enabled || runtimeSettings.channelMute[c];
+			int hasData = 0;
+
+			printbyte(x, PATTERN_Y + 1 + d, (rowColor & 0xff00) | CPATTERN_DIVIDER_LINE, 0x1ff);
+
+			if (p < 0 || p >= PTMOD_ROWS || pattern < 0 || !ptmod_get_pattern_cell(pattern, p, c, &cell))
+			{
+				snprintf(textbuffer, sizeof textbuffer, "%10s", "");
+				cellColor = mutedColor;
+			}
+			else
+			{
+				hasData = cell.sample || cell.period || cell.effect || cell.param;
+				formatPtmodCell(&cell, textbuffer, sizeof textbuffer);
+
+				if (muted)
+					cellColor = mutedColor;
+				else if (stats.active && stats.orderIndex == orderIndex && stats.row == p)
+					cellColor = getColor(CPATTERN_HIGHLIGHT_PLAYING_LINE_FOREGROUND, CPATTERN_HIGHLIGHT_PLAYING_LINE_BACKGROUND);
+				else if (editorInfo.ptmodBlockActive && editorInfo.ptmodBlockPattern == pattern)
+				{
+					int rowStart = editorInfo.ptmodBlockRowStart;
+					int rowEnd = editorInfo.ptmodBlockRowEnd;
+					int channelStart = editorInfo.ptmodBlockChannelStart;
+					int channelEnd = editorInfo.ptmodBlockChannelEnd;
+
+					if (rowStart > rowEnd)
+					{
+						int temp = rowStart;
+						rowStart = rowEnd;
+						rowEnd = temp;
+					}
+					if (channelStart > channelEnd)
+					{
+						int temp = channelStart;
+						channelStart = channelEnd;
+						channelEnd = temp;
+					}
+					if (p >= rowStart && p <= rowEnd && c >= channelStart && c <= channelEnd)
+						cellColor = getColor(CORDER_INST_TABLE_EDITING, CORDER_INST_BACKGROUND);
+					else
+						cellColor = colorWithReadableForeground(cellColor, hasData ? CPATTERN_NOTE_FOREGROUND : CPATTERN_COMMAND_FOREGROUND);
+				}
+				else
+					cellColor = colorWithReadableForeground(cellColor, hasData ? CPATTERN_NOTE_FOREGROUND : CPATTERN_COMMAND_FOREGROUND);
+			}
+
+				printtext(x + 1, PATTERN_Y + 1 + d, cellColor, textbuffer);
+				if (editorInfo.ptmodEditPage == 0 && p == cursorRow && c == editorInfo.ptmodStreamChannel && !eamode)
+				{
+					static const int subColumnOffset[] = { 0, 4, 5, 7, 8, 9 };
+					static const int subColumnWidth[] = { 3, 1, 1, 1, 1, 1 };
+					int subColumn = editorInfo.ptmodStreamSubColumn;
+
+					if (subColumn < 0 || subColumn >= (int)(sizeof subColumnOffset / sizeof subColumnOffset[0]))
+						subColumn = 0;
+				printbg(x + 1 + subColumnOffset[subColumn], PATTERN_Y + 1 + d, cursorcolortable[cursorflash] << 8, subColumnWidth[subColumn]);
+			}
+		}
+	}
+
+	lastDisplayChanCount = -1;
+}
+
 void displayPattern6Chn(GTOBJECT *gt)
 {
-	int maxChan = getVisibleChannelCount();
+	int sidChan = getVisibleChannelCount();
+	int ptmodChan = getPtmodPatternChannelCount();
+	int maxChan = sidChan + ptmodChan;
 	int chnWidth = getPatternChannelWidth();
 	int patternWidth = getPatternAreaWidth();
 	int cursorVisualChannel = getEditorVisualPatternChannel();
+	PTMOD_PREVIEW_STATS ptmodStats;
+
+	ptmodplay_get_stats(&ptmodStats);
 
 	printbytecol(PATTERN_X + patternWidth - 1, PATTERN_Y - 1, getColor(CGENERAL_HIGHLIGHT, CGENERAL_BACKGROUND), 0x1f5, VISIBLEPATTROWS + 2);
 
@@ -702,8 +1074,17 @@ void displayPattern6Chn(GTOBJECT *gt)
 
 	for (int c = 0; c < maxChan; c++)
 	{
-		int c2 = getVisualChannelActualChannel(c);	// 0-11
-		int patternLen = getDisplayPatternLength(gt, c2);
+		int patternLen;
+
+		if (c >= sidChan)
+		{
+			patternLen = ptmodStats.frames ? (int)ptmodStats.frames - 1 : 0;
+		}
+		else
+		{
+			int c2 = getVisualChannelActualChannel(c);	// 0-11
+			patternLen = getDisplayPatternLength(gt, c2);
+		}
 
 		if (patternLen > maxpattlen)
 			maxpattlen = patternLen;
@@ -785,8 +1166,8 @@ void displayPattern6Chn(GTOBJECT *gt)
 	{
 		for (int d = 0; d < VISIBLEPATTROWS; d++)
 		{
-			int c2 = getVisualChannelActualChannel(c);	// 0-11
-			int patternLen = getDisplayPatternLength(gt, c2);
+			int c2 = c < sidChan ? getVisualChannelActualChannel(c) : -1;	// 0-11
+			int patternLen = c < sidChan ? getDisplayPatternLength(gt, c2) : (ptmodStats.frames ? (int)ptmodStats.frames - 1 : 0);
 			int p = editorInfo.epview + d;
 
 			int color = getColor(CPATTERN_FOREGROUND1, CPATTERN_BACKGROUND1);
@@ -801,7 +1182,7 @@ void displayPattern6Chn(GTOBJECT *gt)
 			else if ((p% stepsize) == 0)
 				color = getColor(CPATTERN_FIRST_FOREGROUND1, CPATTERN_FIRST_BACKGROUND1);
 
-			if ((p < 0) || (p > patternLen) || c2 >= editorInfo.maxSIDChannels)
+			if ((p < 0) || (p > patternLen) || (c < sidChan && c2 >= editorInfo.maxSIDChannels))
 			{
 				color = getColor(CUNUSED_MUTED_FOREGROUND, CUNUSED_MUTED_BACKGROUND);
 			}
@@ -817,15 +1198,18 @@ void displayPattern6Chn(GTOBJECT *gt)
 
 	for (int c = 0; c < maxChan; c++)
 	{
-		int c2 = getVisualChannelActualChannel(c);	// 0-11
+		int c2 = c < sidChan ? getVisualChannelActualChannel(c) : -1;	// 0-11
+		int ptmodChannel = c - sidChan;
 		//int playingSong = getActualSongNumber(editorInfo.esnum, c2);	// JP added this. Only highlight playing row if showing the right song
 
 
-		int patternNumber = getDisplayPatternNumber(gt, c2);
-		int patternLen = getDisplayPatternLength(gt, c2);
-		int invalidColumn = c2 >= editorInfo.maxSIDChannels || !isValidPatternNumber(patternNumber);
+		int patternNumber = c < sidChan ? getDisplayPatternNumber(gt, c2) : -1;
+		int patternLen = c < sidChan ? getDisplayPatternLength(gt, c2) : (ptmodStats.frames ? (int)ptmodStats.frames - 1 : 0);
+		int invalidColumn = c < sidChan ? (c2 >= editorInfo.maxSIDChannels || !isValidPatternNumber(patternNumber)) : (ptmodChannel >= ptmodStats.channels);
 
-		if (invalidColumn)
+		if (c >= sidChan)
+			sprintf(textbuffer, " M%01X %02X/%02X", ptmodChannel + 1, ptmodStats.orderIndex, ptmodStats.row);
+		else if (invalidColumn)
 			sprintf(textbuffer, " CH%01X   -- ", c2);
 		else
 			sprintf(textbuffer, " CH%01X   %02X ", c2, patternNumber);
@@ -834,13 +1218,14 @@ void displayPattern6Chn(GTOBJECT *gt)
 
 		printtext(PATTERN_X + 4 + c * chnWidth, PATTERN_Y, headerColor, textbuffer);
 
-		if (getFilterOnOff(gt, c2))
+		if (c < sidChan && getFilterOnOff(gt, c2))
 			headerColor = getColor(CCOLOR_RED, CGENERAL_BACKGROUND);
-		printbyte(PATTERN_X + 9 + c * chnWidth, PATTERN_Y, headerColor, 0x1f3);	// Filter on/off marker
+		if (c < sidChan)
+			printbyte(PATTERN_X + 9 + c * chnWidth, PATTERN_Y, headerColor, 0x1f3);	// Filter on/off marker
 
 
 		headerColor = getColor(CINFO_FOREGROUND, CTRANSPORT_FOREGROUND);
-		if (!(c % 3))
+		if (c < sidChan && !(c % 3))
 		{
 			int t = UIUnderline;
 			UIUnderline = 0;
@@ -887,8 +1272,8 @@ void displayPattern6Chn(GTOBJECT *gt)
 			int color = getColor(CPATTERN_FOREGROUND1, CPATTERN_BACKGROUND1);
 
 
-			if (c2 == editorInfo.epmarkchn)
-			{
+				if (c < sidChan && c2 == editorInfo.epmarkchn)
+				{
 
 				if (editorInfo.epmarkstart <= editorInfo.epmarkend)
 				{
@@ -920,8 +1305,8 @@ void displayPattern6Chn(GTOBJECT *gt)
 
 			}
 
-				if (isValidPatternNumber(gt->chn[c2].lastpattnum) && patternNumber == gt->chn[c2].lastpattnum && isplaying(gt))
-				{
+					if (c < sidChan && isValidPatternNumber(gt->chn[c2].lastpattnum) && patternNumber == gt->chn[c2].lastpattnum && isplaying(gt))
+					{
 					int chnrow = gt->chn[c2].lastpattptr / 4;
 
 					if (chnrow > pattlen[gt->chn[c2].lastpattnum])
@@ -933,21 +1318,40 @@ void displayPattern6Chn(GTOBJECT *gt)
 					}
 			}
 
-			if (gt->chn[c2].mute)
-			{
+				if (c < sidChan && gt->chn[c2].mute)
+				{
 				color = getColor(CUNUSED_MUTED_FOREGROUND, CUNUSED_MUTED_BACKGROUND);
 				colorNoChange = 1;
 			}
 
 
-			if ((p < 0) || (p > patternLen) || c2 >= editorInfo.maxSIDChannels || invalidColumn)
-			{
-				color = getColor(CUNUSED_MUTED_FOREGROUND, CUNUSED_MUTED_BACKGROUND);
-				colorNoChange = 1;
-				sprintf(textbuffer, "        ");
-			}
-			else
-			{
+				if ((p < 0) || (p > patternLen) || (c < sidChan && c2 >= editorInfo.maxSIDChannels) || invalidColumn)
+				{
+					color = getColor(CUNUSED_MUTED_FOREGROUND, CUNUSED_MUTED_BACKGROUND);
+					colorNoChange = 1;
+					sprintf(textbuffer, "        ");
+				}
+				else if (c >= sidChan)
+				{
+					PTMOD_PREVIEW_ROW row;
+
+					if (ptmodplay_get_row(ptmodChannel, (size_t)p, &row))
+					{
+						if (row.sample)
+							sprintf(textbuffer, "%02X %03X %1X%02X", row.sample & 0xff, row.period & 0xfff, row.effect & 0x0f, row.param & 0xff);
+						else
+							sprintf(textbuffer, ".. %03X %1X%02X", row.period & 0xfff, row.effect & 0x0f, row.param & 0xff);
+						notEmpty = row.sample || row.period || row.effect || row.param;
+						colorNoChange = 0;
+					}
+					else
+					{
+						sprintf(textbuffer, "        ");
+						colorNoChange = 1;
+					}
+				}
+				else
+				{
 				if (pattern[patternNumber][p * 4] == ENDPATT)
 				{
 					sprintf(textbuffer, "PATT.END");
@@ -978,8 +1382,8 @@ void displayPattern6Chn(GTOBJECT *gt)
 			}
 
 			int displayCursor = 0;
-			if (p == editorInfo.eppos && !invalidColumn)
-			{
+				if (c < sidChan && p == editorInfo.eppos && !invalidColumn)
+				{
 				displayCursor++;
 				color = colorWithReadableForeground(color, CPATTERN_HIGHLIGHT_FOREGROUND);
 			}
@@ -990,8 +1394,8 @@ void displayPattern6Chn(GTOBJECT *gt)
 			int color5 = color;
 
 
-			if (colorNoChange == 0 && isValidPatternNumber(patternNumber))
-			{
+				if (c < sidChan && colorNoChange == 0 && isValidPatternNumber(patternNumber))
+				{
 				int n = pattern[patternNumber][p * 4] - FIRSTNOTE;
 
 				int noteColor = colorWithReadableForeground(color, CPATTERN_NOTE_FOREGROUND);
@@ -1021,8 +1425,15 @@ void displayPattern6Chn(GTOBJECT *gt)
 			int dispCursorLine = 1;
 
 			// Display highlight line where cursor is
-			if (p == editorInfo.eppos && dispCursorLine && !invalidColumn && !followplay)
-			{
+				if (c >= sidChan && ptmodStats.active && (size_t)p == ptmodStats.frameIndex)
+				{
+					color2 = getColor(CPATTERN_HIGHLIGHT_PLAYING_LINE_FOREGROUND, CPATTERN_HIGHLIGHT_PLAYING_LINE_BACKGROUND);
+					color3 = color2;
+					color4 = color2;
+					color5 = color2;
+				}
+				else if (c < sidChan && p == editorInfo.eppos && dispCursorLine && !invalidColumn && !followplay)
+				{
 				color2 = colorWithBackground(color2, CPATTERN_HIGHLIGHT_BACKGROUND);
 				color3 = colorWithBackground(color3, CPATTERN_HIGHLIGHT_BACKGROUND);
 				color4 = colorWithBackground(color4, CPATTERN_HIGHLIGHT_BACKGROUND);
@@ -1039,11 +1450,14 @@ void displayPattern6Chn(GTOBJECT *gt)
 				}
 			}
 
-			debugPrintPatternRow("multi", c, c2, p, patternNumber, gt->chn[c2].lastpattptr, colorNoChange, color2, color3, color4, color5, textbuffer);
-			printtext(PATTERN_X + 5 + c * chnWidth, PATTERN_Y + 1 + d, color2, textbuffer);
-			printtext(PATTERN_X + 8 + c * chnWidth, PATTERN_Y + 1 + d, color3, &textbuffer[3]);
-			printtext(PATTERN_X + 10 + c * chnWidth, PATTERN_Y + 1 + d, color4, &textbuffer[5]);
-			printtext(PATTERN_X + 11 + c * chnWidth, PATTERN_Y + 1 + d, color5, &textbuffer[6]);
+				debugPrintPatternRow("multi", c, c2, p, patternNumber, c < sidChan ? gt->chn[c2].lastpattptr : 0, colorNoChange, color2, color3, color4, color5, textbuffer);
+				printtext(PATTERN_X + 5 + c * chnWidth, PATTERN_Y + 1 + d, color2, textbuffer);
+				if (c < sidChan)
+				{
+					printtext(PATTERN_X + 8 + c * chnWidth, PATTERN_Y + 1 + d, color3, &textbuffer[3]);
+					printtext(PATTERN_X + 10 + c * chnWidth, PATTERN_Y + 1 + d, color4, &textbuffer[5]);
+					printtext(PATTERN_X + 11 + c * chnWidth, PATTERN_Y + 1 + d, color5, &textbuffer[6]);
+				}
 
 
 			//			sprintf(textbuffer, "%d mark chan c2 %x c %x chn:%x", jdebug[14]++, c2, c, editorInfo.epmarkchn);
@@ -1083,7 +1497,7 @@ void displayPattern6Chn(GTOBJECT *gt)
 			}
 			*/
 
-			if ((displayCursor) && (editorInfo.editmode == EDIT_PATTERN) && (cursorVisualChannel == c))
+				if (c < sidChan && (displayCursor) && (editorInfo.editmode == EDIT_PATTERN) && (cursorVisualChannel == c))
 			{
 				switch (editorInfo.epcolumn)
 				{
@@ -1626,7 +2040,14 @@ void displayTransportBar(GTOBJECT *gt)
 	displayWaveformInfo(TRANSPORT_BAR_X - 5, TRANSPORT_BAR_Y - 1);
 
 
-	printtext(0, TRANSPORT_BAR_Y + 2, getColor(CINFO_FOREGROUND, CTRANSPORT_FOREGROUND), "INFO:");
+	{
+		int infoColor = getColor(CINFO_FOREGROUND, CTRANSPORT_FOREGROUND);
+		int infoWidth = getactivescreencolumns() - 6;
+
+		printtext(0, TRANSPORT_BAR_Y + 2, infoColor, "INFO:");
+		if (infoWidth > 0)
+			printblankc(6, TRANSPORT_BAR_Y + 2, infoColor, infoWidth);
+	}
 	if (editPaletteMode)
 	{
 		int maxPaletteText = getPaletteTextArraySize();
@@ -1641,7 +2062,22 @@ void displayTransportBar(GTOBJECT *gt)
 	}
 	else
 	{
-		printtext(6, TRANSPORT_BAR_Y + 2, getColor(CINFO_FOREGROUND, CTRANSPORT_FOREGROUND), infoTextBuffer);
+		PTMOD_PREVIEW_STATS ptmodStats;
+		ptmodplay_get_stats(&ptmodStats);
+		if (ptmodStats.loaded && isplaying(gt))
+		{
+			snprintf(textbuffer, sizeof textbuffer, "MOD mix %llu pos %d row %d dly %d peak %d",
+				ptmodStats.mixedSamples,
+				ptmodStats.orderIndex,
+				ptmodStats.row,
+				ptmodStats.delayFramesRemaining,
+				ptmodStats.peakSinceReset);
+			printtext(6, TRANSPORT_BAR_Y + 2, getColor(CINFO_FOREGROUND, CTRANSPORT_FOREGROUND), textbuffer);
+		}
+		else
+		{
+			printtext(6, TRANSPORT_BAR_Y + 2, getColor(CINFO_FOREGROUND, CTRANSPORT_FOREGROUND), infoTextBuffer);
+		}
 	}
 
 }
@@ -1649,6 +2085,8 @@ void displayTransportBar(GTOBJECT *gt)
 void displayTransportBarFastForward(int x, int y)
 {
 	int color = getColor(CTRANSPORT_BUTTON_FOREGROUND, CTRANSPORT_BUTTON_BACKGROUND);
+	if (editorInfo.editmode == EDIT_MOD && editorInfo.ptmodStreamFollow)
+		color = getColor(CTRANSPORT_BUTTON_FOREGROUND, CTRANSPORT_ENABLED);
 
 	for (int i = 0;i < 0x3;i++)
 	{
@@ -2063,6 +2501,378 @@ void displaySongInfo(int cc, int OX, int OY)
 			break;
 		}
 	}
+}
+
+static const char *displayBasename(const char *path)
+{
+	const char *slash;
+	const char *backslash;
+
+	if (!path)
+		return "";
+	slash = strrchr(path, '/');
+	backslash = strrchr(path, '\\');
+	if (backslash && (!slash || backslash > slash))
+		slash = backslash;
+	return slash ? slash + 1 : path;
+}
+
+static void printPtmodSettingLine(int OX, int y, int width, int row, int color, const char *text)
+{
+	char line[MAX_COLUMNS + 1];
+	int lineColor = color;
+
+	if (row >= 0 && editorInfo.ptmodEditPage == 1 && row == editorInfo.ptmodEditRow)
+		lineColor = getColor(CORDER_INST_TABLE_EDITING, CORDER_INST_BACKGROUND);
+
+	if (width < 0)
+		width = 0;
+	if (width > MAX_COLUMNS)
+		width = MAX_COLUMNS;
+	snprintf(line, sizeof line, "%-*.*s", width, width, text ? text : "");
+	printtext(OX, y, lineColor, line);
+}
+
+#define PTMOD_SIDE_ROW_TITLE 0
+#define PTMOD_SIDE_ROW_LENGTH 1
+#define PTMOD_SIDE_ROW_RESTART 2
+#define PTMOD_SIDE_ROW_FOLLOW 3
+#define PTMOD_SIDE_ROW_ORDER_FIRST 4
+
+static int displayPtmodOrderListStart(const PTMOD_PREVIEW_STATS *stats)
+{
+	int maxOrder = 0;
+	int selected;
+	int start;
+	int maxStart;
+
+	(void)stats;
+	if (ptmodState.valid && ptmodState.songLength > 0)
+		maxOrder = ptmodState.songLength - 1;
+	selected = getPtmodDisplayOrder(stats);
+	if (selected < 0)
+		selected = 0;
+	if (selected > maxOrder)
+		selected = maxOrder;
+	start = selected - PTMOD_ORDER_VISIBLE_ROWS / 2;
+	maxStart = maxOrder - PTMOD_ORDER_VISIBLE_ROWS + 1;
+	if (maxStart < 0)
+		maxStart = 0;
+	if (start < 0)
+		start = 0;
+	if (start > maxStart)
+		start = maxStart;
+	return start;
+}
+
+static int displayPtmodRuntimeBase(void)
+{
+	return PTMOD_SIDE_ROW_ORDER_FIRST + PTMOD_ORDER_VISIBLE_ROWS;
+}
+
+static int displayPtmodChannelBase(void)
+{
+	return displayPtmodRuntimeBase() + 4;
+}
+
+static int displayPtmodSampleBase(const PTMOD_PREVIEW_STATS *stats)
+{
+	int channels = stats && stats->loaded ? stats->channels : PTMOD_MAX_PREVIEW_CHANNELS;
+
+	if (channels < 0)
+		channels = 0;
+	if (channels > PTMOD_MAX_PREVIEW_CHANNELS)
+		channels = PTMOD_MAX_PREVIEW_CHANNELS;
+	return displayPtmodChannelBase() + channels;
+}
+
+static void formatPtmodWaveform(const PTMOD_SAMPLE *sample, char *dest, size_t destSize)
+{
+	static const char levels[] = ".:-=+*#@";
+	size_t waveWidth;
+	size_t i;
+
+	if (!dest || destSize == 0)
+		return;
+	dest[0] = 0;
+	if (!sample || !sample->data || sample->length == 0)
+	{
+		snprintf(dest, destSize, "(empty)");
+		return;
+	}
+
+	waveWidth = destSize > 1 ? destSize - 1 : 0;
+	if (waveWidth > 28)
+		waveWidth = 28;
+	for (i = 0; i < waveWidth; i++)
+	{
+		size_t start = (sample->length * i) / waveWidth;
+		size_t end = (sample->length * (i + 1)) / waveWidth;
+		unsigned peak = 0;
+		size_t p;
+
+		if (end <= start)
+			end = start + 1;
+		if (end > sample->length)
+			end = sample->length;
+		for (p = start; p < end; p++)
+		{
+			int value = (signed char)sample->data[p];
+			unsigned absValue = value < 0 ? (unsigned)-value : (unsigned)value;
+
+			if (absValue > peak)
+				peak = absValue;
+		}
+		if (peak > 127)
+			peak = 127;
+		dest[i] = levels[(peak * (sizeof levels - 2)) / 127];
+	}
+	dest[waveWidth] = 0;
+}
+
+static void formatPtmodCurrentEffectHelp(const PTMOD_PREVIEW_STATS *stats, char *dest, size_t destSize)
+{
+	PTMOD_CELL cell;
+	int orderIndex;
+	int pattern;
+	int row;
+
+	if (!dest || destSize == 0)
+		return;
+	dest[0] = 0;
+	orderIndex = getPtmodDisplayOrder(stats);
+	pattern = ptmod_order_pattern(orderIndex);
+	row = getPtmodDisplayRow(stats);
+	if (pattern < 0 || !ptmod_get_pattern_cell(pattern, row, editorInfo.ptmodStreamChannel, &cell))
+	{
+		snprintf(dest, destSize, "--");
+		return;
+	}
+	ptmod_format_effect_help(cell.effect, cell.param, dest, destSize);
+}
+
+static void formatPtmodMeterBar(int level, char *dest, size_t destSize)
+{
+	int width;
+	int filled;
+	int i;
+
+	if (!dest || destSize == 0)
+		return;
+	width = (int)destSize - 1;
+	if (width > 24)
+		width = 24;
+	if (width < 0)
+		width = 0;
+	if (level < 0)
+		level = 0;
+	if (level > 64)
+		level = 64;
+	filled = width ? (level * width + 32) / 64 : 0;
+	for (i = 0; i < width; i++)
+		dest[i] = i < filled ? '#' : '.';
+	dest[width] = 0;
+}
+
+static const char *formatPtmodPanLabel(int pan)
+{
+	if (pan <= 0x40)
+		return "L";
+	if (pan >= 0xc0)
+		return "R";
+	return "C";
+}
+
+static void displayPtmodScopePanel(int OX, int *y, int width,
+	const PTMOD_PREVIEW_STATS *stats, const PTMOD_RUNTIME_SETTINGS *runtimeSettings,
+	int color, int mutedColor, int titleColor)
+{
+	int c;
+
+	printtext(OX, (*y)++, titleColor, "SCOPES / METERS");
+	printPtmodSettingLine(OX, (*y)++, width, -1, color, "Ctrl+M hides  MOD mix remains mono");
+	for (c = 0; c < PTMOD_CHANNELS; c++)
+	{
+		char meter[28];
+		int rowColor = runtimeSettings && runtimeSettings->channelMute[c] ? mutedColor : color;
+		int pan = stats ? stats->channelPan[c] : 0x80;
+		int level = stats ? stats->channelLevel[c] : 0;
+		int sample = stats ? stats->channelSample[c] : 0;
+		int period = stats ? stats->channelPeriod[c] : 0;
+		int position = stats ? stats->channelPosition[c] : 0;
+
+		formatPtmodMeterBar(level, meter, sizeof meter);
+		snprintf(textbuffer, sizeof textbuffer, "Ch%d pan:%s vol:%02d [%s]",
+			c + 1, formatPtmodPanLabel(pan), level, meter);
+		printPtmodSettingLine(OX, (*y)++, width, -1, rowColor, textbuffer);
+		snprintf(textbuffer, sizeof textbuffer, "    smp:%02d per:%03X pos:%06X mute:%s",
+			sample, period & 0xfff, position & 0xffffff,
+			runtimeSettings && runtimeSettings->channelMute[c] ? "ON " : "OFF");
+		printPtmodSettingLine(OX, (*y)++, width, -1, rowColor, textbuffer);
+	}
+}
+
+static void displayPtmodSettings(int cc, int OX, int OY)
+{
+	PTMOD_PREVIEW_STATS stats;
+	PTMOD_RUNTIME_SETTINGS runtimeSettings;
+	PTMOD_SAMPLE sample;
+	int width = getSidePanelWidth();
+	int color = getColor(CORDER_INST_FOREGROUND, CORDER_INST_BACKGROUND);
+	int titleColor = getColor(CTITLES_FOREGROUND, CGENERAL_BACKGROUND);
+	int mutedColor = getColor(CUNUSED_MUTED_FOREGROUND, CUNUSED_MUTED_BACKGROUND);
+	int y = OY;
+	int c;
+	int sampleIndex;
+	int orderIndex;
+	int pattern;
+	int orderStart;
+	int runtimeBase;
+	int channelBase;
+	int sampleBase;
+	char wave[32];
+	char effectHelp[96];
+
+	(void)cc;
+	if (width < 40)
+		width = 40;
+	if (OX + width > MAX_COLUMNS)
+		width = MAX_COLUMNS - OX;
+
+	fillArea(OX, OY - 1, width, TRANSPORT_BAR_Y - OY + 3, getColor(CORDER_INST_FOREGROUND, CORDER_INST_BACKGROUND), ' ');
+	ptmodplay_get_stats(&stats);
+	ptmodplay_get_runtime_settings(&runtimeSettings);
+
+	snprintf(textbuffer, sizeof textbuffer, "MOD EDITOR%s", editorInfo.ptmodEditPage == 1 ? "*" : "");
+	printtext(OX, y++, titleColor, textbuffer);
+
+	if (!ptmodState.valid)
+	{
+		printPtmodSettingLine(OX, y++, width, -1, mutedColor, "No ProTracker MOD loaded");
+		return;
+	}
+
+	snprintf(textbuffer, sizeof textbuffer, "Source: %.247s", displayBasename(ptmodState.path));
+	printPtmodSettingLine(OX, y++, width, -1, color, textbuffer);
+	snprintf(textbuffer, sizeof textbuffer, "Orders:%d Patterns:%d Save:F11 %s",
+		ptmodState.songLength, ptmodState.patternCount, ptmodState.dirty ? "DIRTY" : "clean");
+	printPtmodSettingLine(OX, y++, width, -1, color, textbuffer);
+	orderIndex = getPtmodDisplayOrder(&stats);
+	pattern = ptmod_order_pattern(orderIndex);
+	snprintf(textbuffer, sizeof textbuffer, "Ord:%02d Pat:%02X Row:%02X Ch:%d",
+		orderIndex, pattern < 0 ? 0 : pattern, getPtmodDisplayRow(&stats),
+		editorInfo.ptmodStreamChannel + 1);
+	printPtmodSettingLine(OX, y++, width, -1, color, textbuffer);
+
+	snprintf(textbuffer, sizeof textbuffer, "Title: %.28s", ptmodState.title[0] ? ptmodState.title : "(untitled)");
+	printPtmodSettingLine(OX, y++, width, PTMOD_SIDE_ROW_TITLE, color, textbuffer);
+	snprintf(textbuffer, sizeof textbuffer, "Length:%3d", ptmodState.songLength);
+	printPtmodSettingLine(OX, y++, width, PTMOD_SIDE_ROW_LENGTH, color, textbuffer);
+	snprintf(textbuffer, sizeof textbuffer, "Restart:%02d", ptmodState.restartPosition);
+	printPtmodSettingLine(OX, y++, width, PTMOD_SIDE_ROW_RESTART, color, textbuffer);
+	snprintf(textbuffer, sizeof textbuffer, "Follow:[%s] Ctrl+F", editorInfo.ptmodStreamFollow ? "ON " : "OFF");
+	printPtmodSettingLine(OX, y++, width, PTMOD_SIDE_ROW_FOLLOW, color, textbuffer);
+
+	orderStart = displayPtmodOrderListStart(&stats);
+	for (c = 0; c < PTMOD_ORDER_VISIBLE_ROWS; c++)
+	{
+		int order = orderStart + c;
+		int rowId = PTMOD_SIDE_ROW_ORDER_FIRST + c;
+		int rowColor = color;
+		char playMarker = ' ';
+		char cursorMarker = ' ';
+
+		if (order >= ptmodState.songLength)
+		{
+			printPtmodSettingLine(OX, y++, width, rowId, mutedColor, "");
+			continue;
+		}
+		pattern = ptmod_order_pattern(order);
+		if (stats.active && stats.orderIndex == order)
+		{
+			playMarker = '>';
+			rowColor = getColor(CPATTERN_HIGHLIGHT_PLAYING_LINE_FOREGROUND, CPATTERN_HIGHLIGHT_PLAYING_LINE_BACKGROUND);
+		}
+		if (order == orderIndex)
+			cursorMarker = '*';
+		snprintf(textbuffer, sizeof textbuffer, "%c Order %02d  Pattern %02X %c",
+			playMarker, order, pattern < 0 ? 0 : pattern, cursorMarker);
+		printPtmodSettingLine(OX, y++, width, rowId, rowColor, textbuffer);
+	}
+
+	formatPtmodCurrentEffectHelp(&stats, effectHelp, sizeof effectHelp);
+	snprintf(textbuffer, sizeof textbuffer, "Effect: %.60s", effectHelp);
+	printPtmodSettingLine(OX, y++, width, -1, color, textbuffer);
+
+	runtimeBase = displayPtmodRuntimeBase();
+	channelBase = displayPtmodChannelBase();
+	sampleBase = displayPtmodSampleBase(&stats);
+
+	y++;
+	snprintf(textbuffer, sizeof textbuffer, "Preview:%s", runtimeSettings.enabled ? "ON " : "OFF");
+	printPtmodSettingLine(OX, y++, width, runtimeBase, color, textbuffer);
+	snprintf(textbuffer, sizeof textbuffer, "Replay:%s", ptmodplay_replay_mode_name(runtimeSettings.replayMode));
+	printPtmodSettingLine(OX, y++, width, runtimeBase + 1, color, textbuffer);
+	snprintf(textbuffer, sizeof textbuffer, "Mix volume:%3d%%", runtimeSettings.masterVolume);
+	printPtmodSettingLine(OX, y++, width, runtimeBase + 2, color, textbuffer);
+	snprintf(textbuffer, sizeof textbuffer, "Start delay:%3d frames", runtimeSettings.startDelayFrames);
+	printPtmodSettingLine(OX, y++, width, runtimeBase + 3, color, textbuffer);
+	if (runtimeSettings.replayMode == PTMOD_REPLAY_THC_WAVEFORM)
+	{
+		snprintf(textbuffer, sizeof textbuffer, "THCMOD: waveform voice 3 setup%s",
+			stats.voice3Conflict ? " CONFLICT" : "");
+		printPtmodSettingLine(OX, y++, width, -1,
+			stats.voice3Conflict ? titleColor : color,
+			textbuffer);
+	}
+	snprintf(textbuffer, sizeof textbuffer, "Scopes:%s Ctrl+M", editorInfo.ptmodScopeView ? "ON " : "OFF");
+	printPtmodSettingLine(OX, y++, width, -1, color, textbuffer);
+
+	for (c = 0; c < stats.channels && c < PTMOD_MAX_PREVIEW_CHANNELS; c++)
+	{
+		snprintf(textbuffer, sizeof textbuffer, "Ch%d vol:%3d%% mute:%s", c + 1,
+			runtimeSettings.channelVolume[c],
+			runtimeSettings.channelMute[c] ? "ON " : "OFF");
+		printPtmodSettingLine(OX, y++, width, channelBase + c, runtimeSettings.channelMute[c] ? mutedColor : color, textbuffer);
+	}
+
+	y++;
+	if (editorInfo.ptmodScopeView)
+	{
+		displayPtmodScopePanel(OX, &y, width, &stats, &runtimeSettings, color, mutedColor, titleColor);
+		snprintf(textbuffer, sizeof textbuffer, "Pos:%d Pattern:%d Row:%d Speed:%d BPM:%d",
+			stats.orderIndex, stats.pattern, stats.row, stats.speed, stats.bpm);
+		printPtmodSettingLine(OX, y++, width, -1, color, textbuffer);
+		return;
+	}
+	printtext(OX, y++, titleColor, "SAMPLE");
+	sampleIndex = editorInfo.ptmodSampleIndex;
+	if (sampleIndex < 0)
+		sampleIndex = 0;
+	if (sampleIndex >= PTMOD_MAX_SAMPLES)
+		sampleIndex = PTMOD_MAX_SAMPLES - 1;
+	if (!ptmod_get_sample(sampleIndex, &sample))
+		memset(&sample, 0, sizeof sample);
+	snprintf(textbuffer, sizeof textbuffer, "Sample:%02d", sampleIndex + 1);
+	printPtmodSettingLine(OX, y++, width, sampleBase, color, textbuffer);
+	snprintf(textbuffer, sizeof textbuffer, "Name: %.30s", sample.name[0] ? sample.name : "(empty)");
+	printPtmodSettingLine(OX, y++, width, sampleBase + 1, color, textbuffer);
+	snprintf(textbuffer, sizeof textbuffer, "Finetune:%2d", sample.finetune);
+	printPtmodSettingLine(OX, y++, width, sampleBase + 2, color, textbuffer);
+	snprintf(textbuffer, sizeof textbuffer, "Volume:%2d Length:%u", sample.volume, sample.length);
+	printPtmodSettingLine(OX, y++, width, sampleBase + 3, color, textbuffer);
+	snprintf(textbuffer, sizeof textbuffer, "Loop start:%u", sample.loopStart);
+	printPtmodSettingLine(OX, y++, width, sampleBase + 4, color, textbuffer);
+	snprintf(textbuffer, sizeof textbuffer, "Loop length:%u", sample.loopLength);
+	printPtmodSettingLine(OX, y++, width, sampleBase + 5, color, textbuffer);
+	formatPtmodWaveform(&sample, wave, sizeof wave);
+	snprintf(textbuffer, sizeof textbuffer, "Wave:[%s]", wave);
+	printPtmodSettingLine(OX, y++, width, sampleBase + 6, color, textbuffer);
+	printPtmodSettingLine(OX, y++, width, sampleBase + 7, color, "Enter editor  A audition  Ctrl+I/E/D");
+
+	snprintf(textbuffer, sizeof textbuffer, "Pos:%d Pattern:%d Row:%d Speed:%d BPM:%d",
+		stats.orderIndex, stats.pattern, stats.row, stats.speed, stats.bpm);
+	printPtmodSettingLine(OX, y++, width, -1, color, textbuffer);
 }
 
 void updateDisplayWhenFollowingAndPlaying(GTOBJECT *gt)
